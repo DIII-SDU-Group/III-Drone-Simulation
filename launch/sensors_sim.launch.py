@@ -10,11 +10,6 @@ import os
 
 def generate_launch_description():
     config = "/home/" + os.getenv("USER") + "/.config/iii_drone/params.yaml"
-    #config = os.path.join(
-    #    get_package_share_directory('iii_drone'),
-    #    'config',
-    #    'params.yaml'
-    #)
 
     mmwave = Node(
         package='iii_drone_simulation',
