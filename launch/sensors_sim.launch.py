@@ -1,0 +1,23 @@
+from struct import pack
+from launch import LaunchDescription
+from launch.actions import IncludeLaunchDescription
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch_ros.actions import Node
+from launch_ros.substitutions import FindPackageShare
+from launch.substitutions import PathJoinSubstitution
+from ament_index_python.packages import get_package_share_directory
+import os
+
+def generate_launch_description():
+    config = "/home/" + os.getenv("USER") + "/.config/iii_drone/params.yaml"
+
+    mmwave = Node(
+        package='iii_drone_simulation',
+        executable='depth_cam_to_mmwave',
+        name='depth_cam_to_mmwave',
+        parameters=[config]
+    )
+
+    return LaunchDescription([
+        mmwave
+    ])
