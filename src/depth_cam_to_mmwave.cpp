@@ -32,7 +32,9 @@
 #include <pcl/segmentation/sac_segmentation.h>
 #include <pcl/segmentation/extract_clusters.h>
 
-#include "iii_drone_core/utils/geometry.h"
+#include "iii_drone_core/utils/math.hpp"
+
+using namespace iii_drone::math;
 
 using namespace std::chrono_literals;
 
