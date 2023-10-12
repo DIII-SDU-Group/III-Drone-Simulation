@@ -48,5 +48,6 @@ If Gazebo doesn't launch, kill it and try again:
 ```
 pkill -f "gz sim"
 ```
-	
+## Launching the sensor simulation nodes
+TODO: Implement the sensor simulation in the Gazebo model. Write this section.
 
