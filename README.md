@@ -4,10 +4,15 @@ Simulation assets for the III-Drone system
 ## Compatibility
 This version is compatible with
 - `ROS2 Humble`
-- `PX4-Autopilot` DIII fork tag `v1.14.0-rc2`
+- [`PX4-Autopilot` DIII fork tag `v1.14.0-rc2`](https://github.com/DIII-SDU-Group/PX4-Autopilot/tree/v1.14.0-rc2)
+- [`px4_msgs` DIII fork tag `v1.14`](https://github.com/DIII-SDU-Group/px4_msgs/tree/v1.14)
 - `Gazebo Garden` (installed from PX4-Autopilot install script)
-- `micro-ROS-agent` DIII fork branch `humble`
-- `micro_ros_msgs` DIII fork branch `humble`
+- [`micro-ROS-agent` DIII fork tag `III-Drone-v2.2`](https://github.com/DIII-SDU-Group/micro-ROS-Agent/tree/III-Drone-v2.2)
+- [`micro_ros_msgs` DIII fork tag `III-Drone-v2.2`](https://github.com/DIII-SDU-Group/micro_ros_msgs/tree/III-Drone-v2.2)
+- [`III-Drone-Core` v2.2](https://github.com/DIII-SDU-Group/III-Drone-Core/tree/v2.2-staging)
+- [`III-Drone-Interfaces` v2.2](https://github.com/DIII-SDU-Group/III-Drone-Interfaces/tree/v2.2-staging)
+
+See [`III-Drone-Core`](https://github.com/DIII-SDU-Group/III-Drone-Core/tree/v2.2-staging) for more information.
 
 ## Installing simulation environment
 Clone the `PX4-Autopilot` DIII fork tag `v1.14.0-rc2`:
