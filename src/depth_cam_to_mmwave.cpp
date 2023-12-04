@@ -33,6 +33,7 @@
 #include <pcl/segmentation/extract_clusters.h>
 
 #include "iii_drone_core/utils/math.hpp"
+#include "iii_drone_core/configuration/configurator.hpp"
 
 using namespace iii_drone::math;
 
@@ -42,14 +43,16 @@ class DepthCamToMmwave : public rclcpp::Node
 {
 
 	public:
-		DepthCamToMmwave() : Node("depth_cam_to_mmwave_converter", "/mmwave_converter") {
-      this->declare_parameter<std::string>("depth_cam_frame_id", "depth_cam");
-      this->declare_parameter<std::string>("mmwave_frame_id", "mmwave");
+		DepthCamToMmwave() : Node("depth_cam_to_mmwave_converter", "/mmwave_converter"),
+        configurator_(this) {
 
-      this->get_parameter("depth_cam_frame_id", depth_cam_frame_id_);
-      this->get_parameter("mmwave_frame_id", mmwave_frame_id_);
+      configurator_.DeclareParameter<std::string>("/tf/sim/depth_cam_frame_id");
+      configurator_.DeclareParameter<std::string>("/tf/mmwave_frame_id");
 
-			depth_cam_to_mmwave_pcl_publisher_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/mmwave/pcl", 10);
+      depth_cam_frame_id_ = configurator_.GetParameter("/tf/sim/depth_cam_frame_id").as_string();
+      mmwave_frame_id_ = configurator_.GetParameter("/tf/mmwave_frame_id").as_string();
+
+			depth_cam_to_mmwave_pcl_publisher_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/sensor/mmwave/pcl", 10);
 			filtered_points_publisher_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("filtered_points", 10);
 			received_points_publisher_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("received_points", 10);
 			clustered_points_publisher_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("clustered_points", 10);
@@ -65,6 +68,7 @@ class DepthCamToMmwave : public rclcpp::Node
 
 
 	private:
+    iii_drone::configuration::Configurator configurator_;
 		rclcpp::TimerBase::SharedPtr timer_;
 		rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr depth_cam_to_mmwave_pcl_publisher_;
 		rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr subscription_;

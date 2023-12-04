@@ -9,13 +9,10 @@ from ament_index_python.packages import get_package_share_directory
 import os
 
 def generate_launch_description():
-    config = "/home/" + os.getenv("USER") + "/.config/iii_drone/params.yaml"
-
     mmwave = Node(
         package='iii_drone_simulation',
         executable='depth_cam_to_mmwave',
-        name='depth_cam_to_mmwave',
-        parameters=[config]
+        name='depth_cam_to_mmwave'
     )
 
     return LaunchDescription([

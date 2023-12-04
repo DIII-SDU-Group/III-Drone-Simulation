@@ -9,30 +9,36 @@ import os
 import yaml
 
 def generate_launch_description():
-    config = "/home/" + os.getenv("USER") + "/.config/iii_drone/params.yaml"
+    ros_params = "/home/" + os.getenv("USER") + "/.config/iii_drone/ros_params.yaml"
+    ros_params_dict = yaml.safe_load(open(ros_params,"r").read())
+    parameters_file = ros_params_dict["/**"]["ros__parameters"]["parameters_file_path"]
 
-    config_dict = yaml.safe_load(open(config,"r").read())
+    # Replace "~" with "/home/<user>" in the path
+    if parameters_file[0] == "~":
+        parameters_file = "/home/" + os.getenv("USER") + parameters_file[1:]
+    
+    params_dict = yaml.safe_load(open(parameters_file,"r").read())
 
-    drone_frame_id = config_dict["/**"]["ros__parameters"]["drone_frame_id"]
-    cable_gripper_frame_id = config_dict["/**"]["ros__parameters"]["cable_gripper_frame_id"]
-    mmwave_frame_id = config_dict["/**"]["ros__parameters"]["mmwave_frame_id"]
-    depth_cam_frame_id = config_dict["/**"]["ros__parameters"]["depth_cam_frame_id"]
+    drone_frame_id = params_dict["tf"]["drone_frame_id"]["value"]
+    cable_gripper_frame_id = params_dict["tf"]["cable_gripper_frame_id"]["value"]
+    mmwave_frame_id = params_dict["tf"]["mmwave_frame_id"]["value"]
+    depth_cam_frame_id = params_dict["tf"]["sim"]["depth_cam_frame_id"]["value"]
 
-    args = [str(val) for val in config_dict["tf"]["sim"]["ros__parameters"]["drone_to_cable_gripper"]] + [drone_frame_id, cable_gripper_frame_id]
+    args = [str(val) for val in params_dict["tf"]["sim"]["drone_to_cable_gripper"]["value"]] + [drone_frame_id, cable_gripper_frame_id]
     tf_drone_to_cable_gripper = Node(
         package="tf2_ros",
         executable="static_transform_publisher",
         arguments=args
     )
 
-    args = [str(val) for val in config_dict["tf"]["sim"]["ros__parameters"]["drone_to_mmwave"]] + [drone_frame_id, mmwave_frame_id]
+    args = [str(val) for val in params_dict["tf"]["sim"]["drone_to_mmwave"]["value"]] + [drone_frame_id, mmwave_frame_id]
     tf_drone_to_iwr = Node(
         package="tf2_ros",
         executable="static_transform_publisher",
         arguments=args
     )
 
-    args = [str(val) for val in config_dict["tf"]["sim"]["ros__parameters"]["drone_to_depth_cam"]] + [drone_frame_id, depth_cam_frame_id]
+    args = [str(val) for val in params_dict["tf"]["sim"]["drone_to_depth_cam"]["value"]] + [drone_frame_id, depth_cam_frame_id]
     tf_drone_to_depth_cam = Node(
         package="tf2_ros",
         executable="static_transform_publisher",
@@ -42,9 +48,7 @@ def generate_launch_description():
     world_to_drone = Node(
         package="iii_drone_core",
         executable="drone_frame_broadcaster",
-        parameters=[config]
     )
-
 
     return LaunchDescription([
         tf_drone_to_cable_gripper,

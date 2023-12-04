@@ -10,6 +10,7 @@ find_package(ament_cmake REQUIRED)
 find_package(ament_cmake_python REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(iii_drone_core REQUIRED)
+find_package(iii_drone_interfaces REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(pcl_ros REQUIRED)
 find_package(pcl_conversions REQUIRED)
@@ -19,6 +20,7 @@ ament_target_dependencies(depth_cam_to_mmwave
   rclcpp
   sensor_msgs
   iii_drone_core
+  iii_drone_interfaces
   pcl_ros
   pcl_conversions
 )
