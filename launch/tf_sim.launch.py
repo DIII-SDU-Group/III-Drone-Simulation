@@ -11,7 +11,9 @@ import yaml
 def generate_launch_description():
     ros_params = "/home/" + os.getenv("USER") + "/.config/iii_drone/ros_params.yaml"
     ros_params_dict = yaml.safe_load(open(ros_params,"r").read())
-    parameters_file = ros_params_dict["/**"]["ros__parameters"]["parameters_file_path"]
+    parameters_dir = ros_params_dict["/**"]["ros__parameters"]["parameters_dir"]
+    default_parameter_file = ros_params_dict["/**"]["ros__parameters"]["default_parameter_file"]
+    parameters_file = os.path.join(parameters_dir, default_parameter_file)
 
     # Replace "~" with "/home/<user>" in the path
     if parameters_file[0] == "~":
