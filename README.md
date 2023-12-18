@@ -14,6 +14,9 @@ This version is compatible with
 
 See [`III-Drone-Core`](https://github.com/DIII-SDU-Group/III-Drone-Core/tree/v2.2-staging) for more information.
 
+### Installing required ROS packages
+Please perform the installation steps in the `III-Drone-Core` repository.
+
 ## Installing simulation environment
 Clone the `PX4-Autopilot` DIII fork tag `v1.14.0`:
 ```
@@ -30,24 +33,39 @@ Log out and log in again. Then, navigate to the `III-Drone-Simulation` directory
 cd <III-Drone-Simulation-directory>
 ./scripts/install_gazebo_simulation_assets.sh <desired-PX4-Autopilot-parent-directory>/PX4-Autopilot
 ```
-
-### Installing required ROS packages
-Please refer to the `III-Drone-Core` repository for installation of additional required ROS packages
+Go to the ROS2 workspace and build:
+```
+cd <ros2-ws>
+colcon build
+```
 
 ## Running a simulation
-Navigate to the `PX4-Autopilot` directory and build the simulator:
+Navigate to the `PX4-Autopilot` directory and start Gazebo:
 ```
-cd <desired-PX4-Autopilot-parent-directory>/PX4-Autopilot
-make px4_sitl
+PX4_NO_FOLLOW_MODE=1 make px4_sitl gazebo-classic_d4s_dc_drone__hca_full_pylon_setup
 ```
-Now, a simulation with the `d4s_dc_drone` model in the `hca_full_pylon_setup` world autostart id 99999 can be started with:
-```
-PX4_SYS_AUTOSTART=99999 ./build/px4_sitl_default/bin/px4
-```
-If Gazebo doesn't launch, kill it and try again:
-```
-pkill -f "gz sim"
-```
-## Launching the sensor simulation nodes
-TODO: Implement the sensor simulation in the Gazebo model. Write this section.
 
+## Launching the simulation ROS2 system
+After installing `III-Drone-Core`, set `simulation` to true in the system config:
+```
+vim ~/.config/iii_drone/parameters/parameters.yaml
+
+global:
+  simulation:
+    type: bool
+    value: true
+    constant: true
+...
+```
+Then, launch the system:
+```
+cd <ros2-ws>
+source install/setup.sh
+ros2 launch iii_drone_core iii_drone.launch.py
+```
+In a new terminal, open RVIZ:
+```
+cd <ros2-ws>
+source install/setup.sh
+rviz2 -d src/III-Drone-Core/rviz/rviz_config.rviz
+```
