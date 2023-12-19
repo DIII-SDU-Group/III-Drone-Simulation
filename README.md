@@ -18,6 +18,11 @@ See [`III-Drone-Core`](https://github.com/DIII-SDU-Group/III-Drone-Core/tree/v2.
 Please perform the installation steps in the `III-Drone-Core` repository.
 
 ## Installing simulation environment
+Clone the `III-Drone-Simulation` repository:
+```
+cd <ros2-ws>/src
+git clone -b v2.2-staging git@github.com:DIII-SDU-Group/III-Drone-Simulation.git --recursive
+```
 Clone the `PX4-Autopilot` DIII fork tag `v1.14.0`:
 ```
 cd <desired-PX4-Autopilot-parent-directory>
@@ -28,10 +33,10 @@ Run the `PX4-Autopilot` setup script:
 cd PX4-Autopilot
 ./Tools/setup/ubuntu.sh
 ```
-Log out and log in again. Then, navigate to the `III-Drone-Simulation` directory and run the install script:
+Log out and log in again. Then run the install script:
 ```
-cd <III-Drone-Simulation-directory>
-./scripts/install_gazebo_simulation_assets.sh <desired-PX4-Autopilot-parent-directory>/PX4-Autopilot
+cd <ros2-ws>
+./src/III-Drone-Simulation/scripts/install_gazebo_simulation_assets.sh <PX4-Autopilot-directory>
 ```
 Go to the ROS2 workspace and build:
 ```
