@@ -26,7 +26,7 @@ git clone -b v2.2-staging git@github.com:DIII-SDU-Group/III-Drone-Simulation.git
 Clone the `PX4-Autopilot` DIII fork tag `v1.14.0`:
 ```
 cd <desired-PX4-Autopilot-parent-directory>
-git clone git clone git@github.com:DIII-SDU-Group/PX4-Autopilot.git -b v1.14.0 --recursive
+git clone git@github.com:DIII-SDU-Group/PX4-Autopilot.git -b v1.14.0 --recursive
 ```
 Run the `PX4-Autopilot` setup script:
 ```
