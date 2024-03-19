@@ -43,14 +43,11 @@ class DepthCamToMmwave : public rclcpp::Node
 {
 
 	public:
-		DepthCamToMmwave() : Node("depth_cam_to_mmwave_converter", "/mmwave_converter"),
+		DepthCamToMmwave() : Node("depth_cam_to_mmwave", "/depth_cam_to_mmwave"),
         configurator_(this) {
 
-      configurator_.DeclareParameter<std::string>("/tf/sim/depth_cam_frame_id");
-      configurator_.DeclareParameter<std::string>("/tf/mmwave_frame_id");
-
-      depth_cam_frame_id_ = configurator_.GetParameter("/tf/sim/depth_cam_frame_id").as_string();
-      mmwave_frame_id_ = configurator_.GetParameter("/tf/mmwave_frame_id").as_string();
+      depth_cam_frame_id_ = configurator_.GetParameter("depth_cam_frame_id").as_string();
+      mmwave_frame_id_ = configurator_.GetParameter("mmwave_frame_id").as_string();
 
 			depth_cam_to_mmwave_pcl_publisher_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/sensor/mmwave/pcl", 10);
 			filtered_points_publisher_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("filtered_points", 10);
