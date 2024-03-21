@@ -1,5 +1,6 @@
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription
+from launch.substitutions import LaunchConfiguration
+from launch.actions import IncludeLaunchDescription, DeclareLaunchArgument
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
@@ -9,6 +10,14 @@ import os
 import yaml
 
 def generate_launch_description():
+    drone_frame_broadcaster_log_level = LaunchConfiguration("drone_frame_broadcaster_log_level")
+
+    drone_frame_broadcaster_log_level_arg = DeclareLaunchArgument(
+        "drone_frame_broadcaster_log_level",
+        default_value=["info"],
+        description="The logging level for the drone frame broadcaster node, default is INFO",
+    )
+    
     ros_params = "/home/" + os.getenv("USER") + "/.config/iii_drone/ros_params.yaml"
     ros_params_dict = yaml.safe_load(open(ros_params,"r").read())
     parameters_dir = ros_params_dict["/**"]["ros__parameters"]["parameters_dir"]
@@ -50,11 +59,13 @@ def generate_launch_description():
     world_to_drone = Node(
         package="iii_drone_core",
         executable="drone_frame_broadcaster",
+        arguments=["--ros-args", "--log-level", drone_frame_broadcaster_log_level]
     )
 
     return LaunchDescription([
         tf_drone_to_cable_gripper,
         tf_drone_to_iwr,
         tf_drone_to_depth_cam,
-        world_to_drone
+        world_to_drone,
+        drone_frame_broadcaster_log_level_arg
     ])
