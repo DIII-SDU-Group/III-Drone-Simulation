@@ -90,7 +90,7 @@ void DepthCamToMmwave::depth_cam_to_mmwave_pcl(const sensor_msgs::msg::PointClou
 
   std::srand(static_cast<unsigned int>(this->get_clock()->now().nanoseconds()));
 
-  int pcl_size = msg->width;
+  unsigned int pcl_size = msg->width;
 
   std::cout << "Received " << pcl_size << " points in msg" << std::endl;
   uint8_t *ptr = msg->data.data();
@@ -131,7 +131,7 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr DepthCamToMmwave::eucClustering(pcl::PointCl
   pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_filtered (new pcl::PointCloud<pcl::PointXYZ>);
   pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_f (new pcl::PointCloud<pcl::PointXYZ>);
 
-  for (int i = 0; i < cloud->size(); i++) {
+  for (unsigned int i = 0; i < cloud->size(); i++) {
 
     if ((float) rand()/RAND_MAX > 0.7) {
 
@@ -141,7 +141,7 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr DepthCamToMmwave::eucClustering(pcl::PointCl
   }
 
   // Drop points more than 20 m away
-  for (int i = 0; i < cloud_f->size(); i++) {
+  for (unsigned int i = 0; i < cloud_f->size(); i++) {
 
     float dist = sqrt(cloud_f->at(i).x*cloud_f->at(i).x + cloud_f->at(i).y*cloud_f->at(i).y + cloud_f->at(i).z*cloud_f->at(i).z);
 
@@ -184,7 +184,7 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr DepthCamToMmwave::eucClustering(pcl::PointCl
     float y = 0; 
     float z = 0;
 
-    for (int i = 0; i < cloud_cluster->size(); i++) {
+    for (unsigned int i = 0; i < cloud_cluster->size(); i++) {
 
       pcl::PointXYZ point = cloud_cluster->at(i);
 
@@ -210,7 +210,7 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr DepthCamToMmwave::eucClustering(pcl::PointCl
   pcl::PointCloud<pcl::PointXYZ>::Ptr pl_noise_points (new pcl::PointCloud<pcl::PointXYZ>);
 
 
-  for (int i = 0; i < pl_points->size(); i++) {
+  for (unsigned int i = 0; i < pl_points->size(); i++) {
 
     pcl::PointXYZ point = pl_points->at(i);
 
@@ -282,7 +282,7 @@ void DepthCamToMmwave::publishPoints(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud, 
 
     uint8_t *pcl2_ptr = pcl2_msg.data.data();
 
-    for (int i = 0; i < cloud->size(); i++) {
+    for (unsigned int i = 0; i < cloud->size(); i++) {
         pcl::PointXYZ point = (*cloud)[i];
 
         *(reinterpret_cast<float*>(pcl2_ptr + 0)) = point.x;
