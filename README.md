@@ -81,3 +81,17 @@ source install/setup.sh
 rviz2 -d src/III-Drone-Core/rviz/rviz_config.rviz
 ```
 Note that for the sensor ouput to be available as `ROS2` topics, the `ros_gz_bridge` bridge needs to run. This is done in the `sensors_sim.launch.py` launch file, which is automatically started when launching the `III-Drone-Core` launch file `iii_drone.launch.py` when the `simulation` parameter is set to true.
+
+## References
+* The [ros_gz packages](https://github.com/gazebosim/ros_gz?tab=readme-ov-file#readme)
+* [ROS2 Humble gz bridge issue](https://github.com/gazebosim/ros_gz/issues/358)
+* [Gazebo sim + ROS2 version matching](https://gazebosim.org/docs/garden/ros_installation#gazebo-garden)
+* [PX4 on using the ros2_gz_bridge](https://docs.px4.io/main/en/ros/ros2_comm.html)
+* [ROS2 on using the ros2_gz_bridge](https://docs.ros.org/en/humble/Tutorials/Advanced/Simulators/Gazebo/Gazebo.html)
+* [Gazebo ROS2 integration overview](https://classic.gazebosim.org/tutorials?tut=ros2_overview)
+* [PX4 Gazebo simulation](https://docs.px4.io/main/en/sim_gazebo_gz/)
+* [PX4 Gazebo vehicles](https://docs.px4.io/main/en/sim_gazebo_gz/vehicles.html)
+* [Issue on Gazebo depth camera](https://github.com/PX4/PX4-user_guide/pull/2264)
+* [Another issue on Gazebo depth camera](https://github.com/PX4/PX4-user_guide/issues/2283)
+* [Gazebo plugins](https://classic.gazebosim.org/tutorials?tut=ros_gzplugins)
+* [Nicolaj's original tutorial](https://github.com/nhma20/mmWave_ROS2_PX4_Gazebo)
