@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# set -e
+set -e
 # set -x
 
 PX4FIRMDIR=$1
@@ -12,7 +12,7 @@ if [[ "$1" == "" ]]; then
 fi
 
 echo "Installing models.."
-cp -f -r $CWD/../Gazebo-simulation-assets/models/* $PX4FIRMDIR/Tools/simulation/gazebo-classic/sitl_gazebo-classic/models/ -v
+cp -f -r $CWD/../Gazebo-simulation-assets/models/* $PX4FIRMDIR/Tools/simulation/gz/models/ -v
 
 echo
 
@@ -21,14 +21,14 @@ cp -f -r $CWD/../Gazebo-simulation-assets/init.d-posix_airframes/* $PX4FIRMDIR/R
 echo
 
 echo "Installing worlds.."
-cp -f -r $CWD/../Gazebo-simulation-assets/worlds/* $PX4FIRMDIR/Tools/simulation/gazebo-classic/sitl_gazebo-classic/worlds/ -v
+cp -f -r $CWD/../Gazebo-simulation-assets/worlds/* $PX4FIRMDIR/Tools/simulation/gz/worlds/ -v
 
 echo "Installing world models.."
-cp -f -r $CWD/../Gazebo-simulation-assets/world_models/* $PX4FIRMDIR/Tools/simulation/gazebo-classic/sitl_gazebo-classic/models/ -v
+cp -f -r $CWD/../Gazebo-simulation-assets/world_models/* $PX4FIRMDIR/Tools/simulation/gz/models/ -v
 
 echo "Updating CMakeLists.txt files.."
 $CWD/update_airframes_cmakelists.py $PX4FIRMDIR/ROMFS/px4fmu_common/init.d-posix/airframes/CMakeLists.txt $CWD/../Gazebo-simulation-assets/init.d-posix_airframes/
-$CWD/update_sitl_targets_cmakelists.py $PX4FIRMDIR/src/modules/simulation/simulator_mavlink/sitl_targets_gazebo-classic.cmake $CWD/../Gazebo-simulation-assets/models/ $CWD/../Gazebo-simulation-assets/world_models/ $CWD/../Gazebo-simulation-assets/worlds/
+# $CWD/update_sitl_targets_cmakelists.py $PX4FIRMDIR/src/modules/simulation/simulator_mavlink/sitl_targets_gazebo-classic.cmake $CWD/../Gazebo-simulation-assets/models/ $CWD/../Gazebo-simulation-assets/world_models/ $CWD/../Gazebo-simulation-assets/worlds/
 
 # echo "Applying PX4-Autopilot patch.."
 # PWD_temp=${PWD}

@@ -18,6 +18,18 @@ def generate_launch_description():
         description="The logging level for the mmwave node, default is INFO",
     )
     
+    camera_gz_bridge = Node(
+        package='ros_gz_bridge',
+        executable='parameter_bridge',
+        arguments=["/sensor/cable_camera/image_raw@sensor_msgs/msg/Image[gz.msgs.Image"]
+    )
+    
+    depth_cam_gz_bridge = Node(
+        package='ros_gz_bridge',
+        executable='parameter_bridge',
+        arguments=["/depth_camera/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked"]
+    )
+    
     mmwave = Node(
         package='iii_drone_simulation',
         executable='depth_cam_to_mmwave',
@@ -26,6 +38,8 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
+        mmwave_log_level_arg,
         mmwave,
-        mmwave_log_level_arg
+        camera_gz_bridge,
+        depth_cam_gz_bridge
     ])
