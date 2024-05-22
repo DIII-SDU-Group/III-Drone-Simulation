@@ -92,29 +92,31 @@ void DepthCamToMmwave::depth_cam_to_mmwave_pcl(const sensor_msgs::msg::PointClou
 
   unsigned int pcl_size = msg->width;
 
-  std::cout << "Received " << pcl_size << " points in msg" << std::endl;
+  RCLCPP_DEBUG(this->get_logger(), "Received %d points in msg", pcl_size);
   uint8_t *ptr = msg->data.data();
-  const uint32_t POINT_STEP = 32;
+  const uint32_t POINT_STEP = 24;
 
   pcl::PointCloud<pcl::PointXYZ>::Ptr cloud (new pcl::PointCloud<pcl::PointXYZ>);
+
+  pcl::fromROSMsg(*msg, *cloud);
 	
-  for (size_t i = 0; i < pcl_size; i++) {
+  // for (size_t i = 0; i < pcl_size; i++) {
 
-  pcl::PointXYZ point(
-          (float)(*(reinterpret_cast<float*>(ptr + 0))),
-          (float)(*(reinterpret_cast<float*>(ptr + 4))),
-          (float)(*(reinterpret_cast<float*>(ptr + 8)))
-      );
+  // pcl::PointXYZ point(
+  //         (float)(*(reinterpret_cast<float*>(ptr + 0))),
+  //         (float)(*(reinterpret_cast<float*>(ptr + 4))),
+  //         (float)(*(reinterpret_cast<float*>(ptr + 8)))
+  //     );
 
-  cloud->push_back(point);
+  // cloud->push_back(point);
 
       
-      ptr += POINT_STEP;
+  //     ptr += POINT_STEP;
 
-  }   
+  // }   
 
-  cloud->width = pcl_size;
-  cloud->height = 1;
+  // cloud->width = pcl_size;
+  // cloud->height = 1;
 
 	eucClustering(cloud);
 
@@ -124,7 +126,7 @@ void DepthCamToMmwave::depth_cam_to_mmwave_pcl(const sensor_msgs::msg::PointClou
 
 pcl::PointCloud<pcl::PointXYZ>::Ptr DepthCamToMmwave::eucClustering(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud)
 {
-  std::cout << "PointCloud before filtering has: " << cloud->size () << " data points." << std::endl; //*
+  RCLCPP_DEBUG(get_logger(), "PointCloud before filtering has: %d data points.", cloud->size());
 
   publishPoints(cloud, received_points_publisher_, depth_cam_frame_id_);
 
@@ -133,11 +135,15 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr DepthCamToMmwave::eucClustering(pcl::PointCl
 
   for (unsigned int i = 0; i < cloud->size(); i++) {
 
-    if ((float) rand()/RAND_MAX > 0.7) {
+    if (!pcl::isFinite(cloud->at(i))) {
+      continue;
+    }
+
+    // if ((float) rand()/RAND_MAX > 0.7) {
 
       cloud_f->push_back((*cloud)[i]);
 
-    }
+    // }
   }
 
   // Drop points more than 20 m away
@@ -145,12 +151,14 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr DepthCamToMmwave::eucClustering(pcl::PointCl
 
     float dist = sqrt(cloud_f->at(i).x*cloud_f->at(i).x + cloud_f->at(i).y*cloud_f->at(i).y + cloud_f->at(i).z*cloud_f->at(i).z);
 
+    // RCLCPP_DEBUG(get_logger(), "Distance: %f", dist);
+
     if (dist < 10)
       cloud_filtered->push_back(cloud_f->at(i));
 
   }
 
-  std::cout << "PointCloud after filtering has: " << cloud_filtered->size ()  << " data points." << std::endl; //*
+  RCLCPP_DEBUG(get_logger(), "PointCloud after filtering has: %d data points.", cloud_filtered->size());
 
   publishPoints(cloud_filtered, filtered_points_publisher_, depth_cam_frame_id_);
 
@@ -201,7 +209,7 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr DepthCamToMmwave::eucClustering(pcl::PointCl
     pcl::PointXYZ pl_point (x, y, z);
     pl_points->push_back(pl_point);
 
-    std::cout << "PointCloud representing the Cluster: " << cloud_cluster->size () << " data points." << std::endl;
+    RCLCPP_DEBUG(get_logger(), "PointCloud representing the Cluster: %d data points.", cloud_cluster->size());
     j++;
   }
 
@@ -230,7 +238,7 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr DepthCamToMmwave::eucClustering(pcl::PointCl
     noise -= 0.5;
     point.z += noise*factor;
 
-    pcl::PointXYZ new_point(point.z, point.x, point.y);
+    pcl::PointXYZ new_point(point.x, -point.y, -point.z);
 
     pl_noise_points->push_back(new_point);
 

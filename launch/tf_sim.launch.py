@@ -39,27 +39,31 @@ def generate_launch_description():
     tf_drone_to_cable_gripper = Node(
         package="tf2_ros",
         executable="static_transform_publisher",
-        arguments=args
+        arguments=args,
+        parameters=[ros_params],
     )
 
     args = [str(val) for val in params_dict["tf"]["sim"]["drone_to_mmwave"]["value"]] + [drone_frame_id, mmwave_frame_id]
     tf_drone_to_iwr = Node(
         package="tf2_ros",
         executable="static_transform_publisher",
-        arguments=args
+        arguments=args,
+        parameters=[ros_params],
     )
 
     args = [str(val) for val in params_dict["tf"]["sim"]["drone_to_depth_cam"]["value"]] + [drone_frame_id, depth_cam_frame_id]
     tf_drone_to_depth_cam = Node(
         package="tf2_ros",
         executable="static_transform_publisher",
-        arguments=args
+        arguments=args,
+        parameters=[ros_params],
     )
 
     world_to_drone = Node(
         package="iii_drone_core",
         executable="drone_frame_broadcaster",
-        arguments=["--ros-args", "--log-level", drone_frame_broadcaster_log_level]
+        arguments=["--ros-args", "--log-level", drone_frame_broadcaster_log_level],
+        parameters=[ros_params],
     )
 
     return LaunchDescription([
