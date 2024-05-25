@@ -33,7 +33,7 @@
 #include <pcl/segmentation/extract_clusters.h>
 
 #include "iii_drone_core/utils/math.hpp"
-#include "iii_drone_core/configuration/configurator.hpp"
+#include "iii_drone_configuration/configurator.hpp"
 
 using namespace iii_drone::math;
 
