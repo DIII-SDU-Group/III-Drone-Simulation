@@ -10,7 +10,8 @@ from ament_index_python.packages import get_package_share_directory
 import os
 
 def generate_launch_description():
-    ros_params = "/home/" + os.getenv("USER") + "/.config/iii_drone/ros_params.yaml"
+    iii_config_dir = os.path.join(os.getenv("CONFIG_BASE_DIR", default="~/.config"), "iii_drone")
+    ros_params = os.path.join(iii_config_dir, "ros_params.yaml")
 
     mmwave_log_level = LaunchConfiguration("mmwave_log_level")
 

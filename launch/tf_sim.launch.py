@@ -19,7 +19,7 @@ def generate_launch_description():
     )
     
     iii_config_dir = os.path.join(os.getenv("CONFIG_BASE_DIR", default="~/.config"), "iii_drone")
-    ros_params = os.path.join(iii_config_dir, "iii_drone", "ros_params.yaml")
+    ros_params = os.path.join(iii_config_dir, "ros_params.yaml")
     ros_params_dict = yaml.safe_load(open(ros_params,"r").read())
     parameters_dir = os.path.join(iii_config_dir, ros_params_dict["/**"]["ros__parameters"]["parameters_path_postfix"])
     default_parameter_file = ros_params_dict["/**"]["ros__parameters"]["default_parameter_file"]
@@ -68,9 +68,9 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
+        drone_frame_broadcaster_log_level_arg,
         tf_drone_to_cable_gripper,
         tf_drone_to_iwr,
         tf_drone_to_depth_cam,
         world_to_drone,
-        drone_frame_broadcaster_log_level_arg
     ])
