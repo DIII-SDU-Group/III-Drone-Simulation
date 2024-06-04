@@ -65,7 +65,7 @@ class DepthCamToMmwave : public rclcpp::Node
 
 
 	private:
-    iii_drone::configuration::Configurator configurator_;
+    iii_drone::configuration::Configurator<rclcpp::Node> configurator_;
 		rclcpp::TimerBase::SharedPtr timer_;
 		rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr depth_cam_to_mmwave_pcl_publisher_;
 		rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr subscription_;
