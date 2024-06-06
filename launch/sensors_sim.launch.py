@@ -44,8 +44,8 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-        # mmwave_log_level_arg,
+        mmwave_log_level_arg,
         mmwave,
-        # camera_gz_bridge,
-        # depth_cam_gz_bridge
+        camera_gz_bridge,
+        depth_cam_gz_bridge
     ])
