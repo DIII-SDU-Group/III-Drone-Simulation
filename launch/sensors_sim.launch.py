@@ -24,6 +24,7 @@ def generate_launch_description():
     camera_gz_bridge = Node(
         package='ros_gz_bridge',
         executable='parameter_bridge',
+        name='camera_gz_bridge',
         arguments=["/sensor/cable_camera/image_raw@sensor_msgs/msg/Image[gz.msgs.Image"],
         parameters=[ros_params],
     )
@@ -31,6 +32,7 @@ def generate_launch_description():
     depth_cam_gz_bridge = Node(
         package='ros_gz_bridge',
         executable='parameter_bridge',
+        name='depth_cam_gz_bridge',
         arguments=["/depth_camera/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked"],
         parameters=[ros_params],
     )
