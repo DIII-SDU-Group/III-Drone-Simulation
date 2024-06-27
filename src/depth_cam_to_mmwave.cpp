@@ -168,7 +168,7 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr DepthCamToMmwave::eucClustering(pcl::PointCl
 
   std::vector<pcl::PointIndices> cluster_indices;
   pcl::EuclideanClusterExtraction<pcl::PointXYZ> ec;
-  ec.setClusterTolerance (2.); 
+  ec.setClusterTolerance (1.2); 
   ec.setMinClusterSize (5);
   ec.setMaxClusterSize (25000);
   ec.setSearchMethod (tree);
