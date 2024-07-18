@@ -44,7 +44,7 @@ class DepthCamToMmwave : public rclcpp::Node
 
 	public:
 		DepthCamToMmwave() : Node("depth_cam_to_mmwave", "/depth_cam_to_mmwave"),
-        configurator_(this) {
+        configurator_(this,"depth_cam_to_mmwave") {
 
       depth_cam_frame_id_ = configurator_.GetParameter("depth_cam_frame_id").as_string();
       mmwave_frame_id_ = configurator_.GetParameter("mmwave_frame_id").as_string();
