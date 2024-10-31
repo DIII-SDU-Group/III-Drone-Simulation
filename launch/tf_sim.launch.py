@@ -22,12 +22,13 @@ def generate_launch_description():
     ros_params = os.path.join(iii_config_dir, "ros_params.yaml")
     ros_params_dict = yaml.safe_load(open(ros_params,"r").read())
     parameters_dir = os.path.join(iii_config_dir, ros_params_dict["/**"]["ros__parameters"]["parameters_path_postfix"])
-    default_parameter_file = ros_params_dict["/**"]["ros__parameters"]["default_parameter_file"]
+    default_parameter_file = ros_params_dict["/**"]["ros__parameters"]["sim_parameter_file"]
     parameters_file = os.path.join(parameters_dir, default_parameter_file)
 
     # Replace "~" with "/home/<user>" in the path
-    if parameters_file[0] == "~":
-        parameters_file = "/home/" + os.getenv("USER") + parameters_file[1:]
+    # if parameters_file[0] == "~":
+    #     parameters_file = "/home/" + os.getenv("USER") + parameters_file[1:]
+    parameters_file = os.path.expanduser(parameters_file)
     
     params_dict = yaml.safe_load(open(parameters_file,"r").read())
 
