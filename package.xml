@@ -21,8 +21,6 @@
   <depend>iii_drone_interfaces</depend>
   <depend>pcl_ros</depend>
   <depend>px4_msgs</depend>
-  <exec_depend>micro_ros_agent</exec_depend>
-  <exec_depend>micro_ros_msgs</exec_depend>
 
   <export>
     <build_type>ament_cmake</build_type>
