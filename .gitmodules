@@ -1,0 +1,3 @@
+[submodule "Gazebo-simulation-assets"]
+	path = Gazebo-simulation-assets
+	url = git@github.com:DIII-SDU-Group/Gazebo-simulation-assets.git
