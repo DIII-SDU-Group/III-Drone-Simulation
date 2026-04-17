@@ -5,6 +5,15 @@ from launch_ros.actions import Node
 import os
 import yaml
 
+
+def _resolve_ros_params_file() -> str:
+    explicit = os.environ.get("III_SYSTEM_PARAMETER_FILE")
+    if explicit:
+        return os.path.expanduser(explicit)
+
+    iii_config_dir = os.path.join(os.path.expanduser(os.getenv("CONFIG_BASE_DIR", default="~/.config")), "iii_drone")
+    return os.path.join(iii_config_dir, "ros_params_sim.yaml")
+
 def generate_launch_description():
     drone_frame_broadcaster_log_level = LaunchConfiguration("drone_frame_broadcaster_log_level")
 
@@ -14,8 +23,7 @@ def generate_launch_description():
         description="The logging level for the drone frame broadcaster node, default is INFO",
     )
     
-    iii_config_dir = os.path.join(os.path.expanduser(os.getenv("CONFIG_BASE_DIR", default="~/.config")), "iii_drone")
-    ros_params = os.path.join(iii_config_dir, "ros_params_sim.yaml")
+    ros_params = _resolve_ros_params_file()
     with open(ros_params, "r") as file:
         ros_params_dict = yaml.safe_load(file) or {}
     params = ros_params_dict["/**"]["ros__parameters"]

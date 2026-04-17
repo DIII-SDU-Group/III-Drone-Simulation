@@ -4,9 +4,17 @@ from launch.actions import DeclareLaunchArgument
 from launch_ros.actions import Node
 import os
 
-def generate_launch_description():
+
+def _resolve_ros_params_file() -> str:
+    explicit = os.environ.get("III_SYSTEM_PARAMETER_FILE")
+    if explicit:
+        return os.path.expanduser(explicit)
+
     iii_config_dir = os.path.join(os.path.expanduser(os.getenv("CONFIG_BASE_DIR", default="~/.config")), "iii_drone")
-    ros_params = os.path.join(iii_config_dir, "ros_params_sim.yaml")
+    return os.path.join(iii_config_dir, "ros_params_sim.yaml")
+
+def generate_launch_description():
+    ros_params = _resolve_ros_params_file()
 
     mmwave_log_level = LaunchConfiguration("mmwave_log_level")
 

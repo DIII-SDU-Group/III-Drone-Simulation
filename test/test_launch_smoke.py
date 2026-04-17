@@ -116,3 +116,19 @@ def test_tf_launch_uses_frame_ids_from_configuration(tmp_path, monkeypatch):
     assert nodes[2]._Node__arguments[-2:] == ["drone", "depth_camera"]
     assert nodes[3]._Node__package == "iii_drone_core"
     assert nodes[3]._Node__node_executable == "drone_frame_broadcaster"
+
+
+def test_tf_launch_static_transform_argument_counts_use_production_config(monkeypatch):
+    production_params = PACKAGE_ROOT.parent / "III-Drone-Configuration" / "config" / "ros_params_sim.yaml"
+    monkeypatch.setenv("III_SYSTEM_PARAMETER_FILE", str(production_params))
+
+    tf_module = _load_module("launch/tf_sim.launch.py")
+    description = tf_module.generate_launch_description()
+    static_transform_nodes = [
+        entity for entity in description.entities
+        if isinstance(entity, Node) and entity._Node__node_executable == "static_transform_publisher"
+    ]
+
+    assert len(static_transform_nodes) == 3
+    for node in static_transform_nodes:
+        assert len(node._Node__arguments) in (8, 9)
