@@ -33,10 +33,10 @@ These launch files are the main integration points consumed by the larger III la
 
 The simulation launch files expect a configuration tree rooted at:
 
-- `$CONFIG_BASE_DIR/iii_drone/ros_params.yaml`
-- `$CONFIG_BASE_DIR/iii_drone/parameters/<sim-parameter-file>`
+- `$CONFIG_BASE_DIR/iii_drone/profiles/sim.yaml`
+- `$CONFIG_BASE_DIR/iii_drone/parameter_sets/sim/<active-parameter-set>`
 
-Those files provide frame IDs and transform values for the simulated TF publishers.
+The `sim.yaml` selector chooses the active parameter set for simulation. That parameter-set file provides frame IDs and transform values for the simulated TF publishers.
 
 ## Tests
 

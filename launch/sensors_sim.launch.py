@@ -2,16 +2,16 @@ from launch import LaunchDescription
 from launch.substitutions import LaunchConfiguration
 from launch.actions import DeclareLaunchArgument
 from launch_ros.actions import Node
-import os
 
+from iii_drone_configuration.schema_utils import resolve_active_parameter_file, seed_runtime_configuration
 
 def _resolve_ros_params_file() -> str:
-    explicit = os.environ.get("III_SYSTEM_PARAMETER_FILE")
-    if explicit:
-        return os.path.expanduser(explicit)
+    seed_runtime_configuration("sim")
+    return str(resolve_active_parameter_file("sim"))
 
-    iii_config_dir = os.path.join(os.path.expanduser(os.getenv("CONFIG_BASE_DIR", default="~/.config")), "iii_drone")
-    return os.path.join(iii_config_dir, "ros_params_sim.yaml")
+
+def _parameter_sources() -> list[object]:
+    return [_resolve_ros_params_file(), {"use_sim_time": True}]
 
 def generate_launch_description():
     ros_params = _resolve_ros_params_file()
@@ -29,7 +29,7 @@ def generate_launch_description():
         executable='parameter_bridge',
         name='camera_gz_bridge',
         arguments=["/sensor/cable_camera/image_raw@sensor_msgs/msg/Image[gz.msgs.Image"],
-        parameters=[ros_params],
+        parameters=_parameter_sources(),
     )
     
     depth_cam_gz_bridge = Node(
@@ -37,7 +37,7 @@ def generate_launch_description():
         executable='parameter_bridge',
         name='depth_cam_gz_bridge',
         arguments=["/depth_camera/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked"],
-        parameters=[ros_params],
+        parameters=_parameter_sources(),
     )
     
     mmwave = Node(
@@ -45,7 +45,7 @@ def generate_launch_description():
         executable='depth_cam_to_mmwave',
         name='depth_cam_to_mmwave',
         arguments=["--ros-args", "--log-level", mmwave_log_level],
-        parameters=[ros_params],
+        parameters=_parameter_sources(),
     )
 
     return LaunchDescription([

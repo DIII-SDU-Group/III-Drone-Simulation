@@ -21,18 +21,17 @@ def _load_module(relative_path: str):
 
 def _write_config_tree(base_dir: Path):
     config_root = base_dir / "iii_drone"
-    parameters_dir = config_root / "parameters"
-    parameters_dir.mkdir(parents=True, exist_ok=True)
+    profiles_dir = config_root / "profiles"
+    parameter_set_dir = config_root / "parameter_sets" / "sim" / "tracked"
+    profiles_dir.mkdir(parents=True, exist_ok=True)
+    parameter_set_dir.mkdir(parents=True, exist_ok=True)
 
-    (config_root / "ros_params.yaml").write_text(
-        "/**:\n"
-        "  ros__parameters:\n"
-        "    parameters_path_postfix: parameters\n"
-        "    sim_parameter_file: sim.yaml\n"
-        "    default_parameter_file: sim.yaml\n"
+    (profiles_dir / "sim.yaml").write_text(
+        "version: 1\n"
+        "active_parameter_set: tracked/default.yaml\n"
     )
 
-    (config_root / "ros_params_sim.yaml").write_text(
+    (parameter_set_dir / "default.yaml").write_text(
         "/**:\n"
         "  ros__parameters:\n"
         "    /tf/drone_frame_id: drone\n"
@@ -42,25 +41,6 @@ def _write_config_tree(base_dir: Path):
         "    /tf/sim/drone_to_cable_gripper: [0, 0, 0, 0, 0, 0]\n"
         "    /tf/sim/drone_to_mmwave: [0, 0, 0, 0, 0, 0]\n"
         "    /tf/sim/drone_to_depth_cam: [0, 0, 0, 0, 0, 0]\n"
-    )
-
-    (parameters_dir / "sim.yaml").write_text(
-        "tf:\n"
-        "  drone_frame_id:\n"
-        "    value: drone\n"
-        "  cable_gripper_frame_id:\n"
-        "    value: cable_gripper\n"
-        "  mmwave_frame_id:\n"
-        "    value: mmwave\n"
-        "  sim:\n"
-        "    depth_cam_frame_id:\n"
-        "      value: depth_camera\n"
-        "    drone_to_cable_gripper:\n"
-        "      value: [0, 0, 0, 0, 0, 0]\n"
-        "    drone_to_mmwave:\n"
-        "      value: [0, 0, 0, 0, 0, 0]\n"
-        "    drone_to_depth_cam:\n"
-        "      value: [0, 0, 0, 0, 0, 0]\n"
     )
 
 
@@ -119,7 +99,15 @@ def test_tf_launch_uses_frame_ids_from_configuration(tmp_path, monkeypatch):
 
 
 def test_tf_launch_static_transform_argument_counts_use_production_config(monkeypatch):
-    production_params = PACKAGE_ROOT.parent / "III-Drone-Configuration" / "config" / "ros_params_sim.yaml"
+    production_params = (
+        PACKAGE_ROOT.parent
+        / "III-Drone-Configuration"
+        / "config"
+        / "parameter_sets"
+        / "sim"
+        / "tracked"
+        / "default.yaml"
+    )
     monkeypatch.setenv("III_SYSTEM_PARAMETER_FILE", str(production_params))
 
     tf_module = _load_module("launch/tf_sim.launch.py")
