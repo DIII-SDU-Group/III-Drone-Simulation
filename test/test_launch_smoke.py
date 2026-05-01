@@ -1,9 +1,7 @@
 import importlib.util
-import os
 from pathlib import Path
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
 from launch_ros.actions import Node
 
 
@@ -48,37 +46,44 @@ def test_simulation_launch_files_generate_descriptions(tmp_path, monkeypatch):
     _write_config_tree(tmp_path)
     monkeypatch.setenv("CONFIG_BASE_DIR", str(tmp_path))
 
-    sensors_module = _load_module("launch/sensors_sim.launch.py")
+    sim_assets_module = _load_module("launch/sim_assets.launch.py")
     tf_module = _load_module("launch/tf_sim.launch.py")
 
-    sensors_description = sensors_module.generate_launch_description()
+    sim_assets_description = sim_assets_module.generate_launch_description()
     tf_description = tf_module.generate_launch_description()
 
-    assert isinstance(sensors_description, LaunchDescription)
+    assert isinstance(sim_assets_description, LaunchDescription)
     assert isinstance(tf_description, LaunchDescription)
-    assert len(sensors_description.entities) == 4
+    assert len(sim_assets_description.entities) == 4
     assert len(tf_description.entities) == 5
 
 
-def test_sensors_launch_contains_expected_nodes_and_argument(tmp_path, monkeypatch):
+def test_sim_assets_launch_contains_expected_bridge_nodes(tmp_path, monkeypatch):
     _write_config_tree(tmp_path)
     monkeypatch.setenv("CONFIG_BASE_DIR", str(tmp_path))
 
-    sensors_module = _load_module("launch/sensors_sim.launch.py")
-    description = sensors_module.generate_launch_description()
+    sim_assets_module = _load_module("launch/sim_assets.launch.py")
+    description = sim_assets_module.generate_launch_description()
 
-    assert isinstance(description.entities[0], DeclareLaunchArgument)
     nodes = [entity for entity in description.entities if isinstance(entity, Node)]
 
     assert [node._Node__node_name for node in nodes] == [
-        "depth_cam_to_mmwave",
+        "clock_gz_bridge",
         "camera_gz_bridge",
         "depth_cam_gz_bridge",
+        "mmwave_gz_bridge",
     ]
     assert [node._Node__package for node in nodes] == [
-        "iii_drone_simulation",
         "ros_gz_bridge",
         "ros_gz_bridge",
+        "ros_gz_bridge",
+        "ros_gz_bridge",
+    ]
+    assert nodes[0]._Node__arguments == [
+        "/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock"
+    ]
+    assert nodes[3]._Node__arguments == [
+        "/sensor/mmwave/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked"
     ]
 
 
@@ -120,3 +125,19 @@ def test_tf_launch_static_transform_argument_counts_use_production_config(monkey
     assert len(static_transform_nodes) == 3
     for node in static_transform_nodes:
         assert len(node._Node__arguments) in (8, 9)
+
+
+def test_conductor_asset_is_present_and_contains_four_conductors():
+    asset = (
+        PACKAGE_ROOT
+        / "Gazebo-simulation-assets"
+        / "world_models"
+        / "hcaa_pylon_setup"
+        / "conductors.yaml"
+    )
+
+    content = asset.read_text()
+
+    assert "frame_id: world" in content
+    assert content.count("- id: conductor_") == 4
+    assert content.count("samples:") == 4

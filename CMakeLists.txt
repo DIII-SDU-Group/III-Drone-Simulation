@@ -17,6 +17,34 @@ find_package(iii_drone_interfaces REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(pcl_ros REQUIRED)
 find_package(pcl_conversions REQUIRED)
+find_package(gz-plugin2 REQUIRED COMPONENTS register)
+find_package(gz-common5 REQUIRED COMPONENTS io)
+find_package(gz-math7 REQUIRED)
+find_package(yaml-cpp REQUIRED)
+
+find_package(gz-sim8 QUIET)
+if(gz-sim8_FOUND)
+  find_package(gz-msgs10 REQUIRED)
+  find_package(gz-transport13 REQUIRED)
+  set(III_DRONE_SIMULATION_GZ_SIM_TARGET gz-sim8::core)
+  set(III_DRONE_SIMULATION_GZ_MSGS_TARGET gz-msgs10::core)
+  set(III_DRONE_SIMULATION_GZ_TRANSPORT_TARGET gz-transport13::core)
+else()
+  find_package(gz-sim7 REQUIRED)
+  find_package(gz-msgs9 REQUIRED)
+  find_package(gz-transport12 REQUIRED)
+  set(III_DRONE_SIMULATION_GZ_SIM_TARGET gz-sim7::core)
+  set(III_DRONE_SIMULATION_GZ_MSGS_TARGET gz-msgs9::core)
+  set(III_DRONE_SIMULATION_GZ_TRANSPORT_TARGET gz-transport12::core)
+endif()
+
+if(TARGET yaml-cpp::yaml-cpp)
+  set(III_DRONE_SIMULATION_YAML_CPP_TARGET yaml-cpp::yaml-cpp)
+elseif(TARGET yaml-cpp)
+  set(III_DRONE_SIMULATION_YAML_CPP_TARGET yaml-cpp)
+else()
+  message(FATAL_ERROR "yaml-cpp target not found")
+endif()
 
 add_executable(depth_cam_to_mmwave src/depth_cam_to_mmwave.cpp)
 ament_target_dependencies(depth_cam_to_mmwave
@@ -29,6 +57,22 @@ ament_target_dependencies(depth_cam_to_mmwave
   pcl_conversions
 )
 install(TARGETS depth_cam_to_mmwave DESTINATION lib/${PROJECT_NAME})
+
+add_library(iii_drone_mmwave_conductor_sensor_plugin SHARED
+  src/mmwave_conductor_sensor_plugin.cpp
+)
+target_compile_features(iii_drone_mmwave_conductor_sensor_plugin PRIVATE cxx_std_17)
+target_link_libraries(iii_drone_mmwave_conductor_sensor_plugin
+  PRIVATE
+    ${III_DRONE_SIMULATION_GZ_SIM_TARGET}
+    gz-plugin2::requested
+    ${III_DRONE_SIMULATION_GZ_MSGS_TARGET}
+    ${III_DRONE_SIMULATION_GZ_TRANSPORT_TARGET}
+    gz-common5::requested
+    gz-math7::core
+    ${III_DRONE_SIMULATION_YAML_CPP_TARGET}
+)
+install(TARGETS iii_drone_mmwave_conductor_sensor_plugin DESTINATION lib)
 
 ############
 # Install ##

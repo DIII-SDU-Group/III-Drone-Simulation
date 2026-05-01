@@ -14,7 +14,7 @@ This package provides:
 
 ### Launch Files
 
-- `launch/sensors_sim.launch.py`: starts the simulated sensor bridge nodes and the `depth_cam_to_mmwave` node
+- `launch/sim_assets.launch.py`: starts the simulated Gazebo asset bridge nodes, including `/clock`
 - `launch/tf_sim.launch.py`: starts static transform publishers and the drone frame broadcaster for simulation
 
 These launch files are the main integration points consumed by the larger III launch stack when simulation mode is enabled.
