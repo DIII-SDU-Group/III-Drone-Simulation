@@ -11,12 +11,15 @@ include(CTest)
 find_package(ament_cmake REQUIRED)
 find_package(ament_cmake_python REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(rclcpp_lifecycle REQUIRED)
 find_package(iii_drone_core REQUIRED)
 find_package(iii_drone_configuration REQUIRED)
 find_package(iii_drone_interfaces REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
 find_package(pcl_ros REQUIRED)
 find_package(pcl_conversions REQUIRED)
+find_package(px4_msgs REQUIRED)
 find_package(gz-plugin2 REQUIRED COMPONENTS register)
 find_package(gz-common5 REQUIRED COMPONENTS io)
 find_package(gz-math7 REQUIRED)
@@ -58,6 +61,21 @@ ament_target_dependencies(depth_cam_to_mmwave
 )
 install(TARGETS depth_cam_to_mmwave DESTINATION lib/${PROJECT_NAME})
 
+add_executable(sim_charger_gripper_node src/sim_charger_gripper_node.cpp)
+target_compile_features(sim_charger_gripper_node PRIVATE cxx_std_17)
+ament_target_dependencies(sim_charger_gripper_node
+  rclcpp
+  rclcpp_lifecycle
+  std_msgs
+  iii_drone_interfaces
+  px4_msgs
+)
+target_link_libraries(sim_charger_gripper_node
+  ${III_DRONE_SIMULATION_GZ_MSGS_TARGET}
+  ${III_DRONE_SIMULATION_GZ_TRANSPORT_TARGET}
+)
+install(TARGETS sim_charger_gripper_node DESTINATION lib/${PROJECT_NAME})
+
 add_library(iii_drone_mmwave_conductor_sensor_plugin SHARED
   src/mmwave_conductor_sensor_plugin.cpp
 )
@@ -74,9 +92,28 @@ target_link_libraries(iii_drone_mmwave_conductor_sensor_plugin
 )
 install(TARGETS iii_drone_mmwave_conductor_sensor_plugin DESTINATION lib)
 
+add_library(iii_drone_sim_charger_gripper_plugin SHARED
+  src/sim_charger_gripper_plugin.cpp
+)
+target_compile_features(iii_drone_sim_charger_gripper_plugin PRIVATE cxx_std_17)
+target_link_libraries(iii_drone_sim_charger_gripper_plugin
+  PRIVATE
+    ${III_DRONE_SIMULATION_GZ_SIM_TARGET}
+    gz-plugin2::requested
+    ${III_DRONE_SIMULATION_GZ_MSGS_TARGET}
+    ${III_DRONE_SIMULATION_GZ_TRANSPORT_TARGET}
+    gz-common5::requested
+    gz-math7::core
+    ${III_DRONE_SIMULATION_YAML_CPP_TARGET}
+)
+install(TARGETS iii_drone_sim_charger_gripper_plugin DESTINATION lib)
+
 ############
 # Install ##
 ############
+# Export information to downstream packages
+ament_python_install_package(${PROJECT_NAME})
+
 # Export information to downstream packages
 if(ROS_DISTRO IN_LIST ROS_DISTROS)
   ament_export_dependencies(ament_cmake rclcpp rosidl_default_runtime eigen3_cmake_module Eigen3 px4_msgs geometry_msgs sensor_msgs OpenCV)

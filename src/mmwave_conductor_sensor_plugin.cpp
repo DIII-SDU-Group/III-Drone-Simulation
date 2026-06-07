@@ -31,9 +31,8 @@ namespace iii_drone::simulation
 namespace
 {
 
-constexpr double kDefaultMinPointDist = 0.99;
 constexpr double kDefaultMaxPointDist = 18.0;
-constexpr double kDefaultViewConeSlope = 0.55;
+constexpr double kDefaultViewConeSlope = 0.7;
 constexpr double kDefaultPlaneHalfThickness = 0.08;
 constexpr double kDefaultSigmaAlong = 0.12;
 constexpr double kDefaultSigmaCross = 0.03;
@@ -101,7 +100,7 @@ class MmwaveConductorSensorPlugin :
   private: bool LoadConductors(const std::string & asset_uri);
   private: bool ResolveLink(const gz::sim::EntityComponentManager & ecm);
   private: void UpdateCorridorBounds();
-  private: bool IsWithinCorridorFootprint(
+  private: bool IsWithinConductorSpan(
       const gz::math::Vector3d & world_point) const;
   private: std::optional<DetectionCandidate> ProjectClosestPointOnSegment(
       const gz::math::Pose3d & sensor_world_pose,
@@ -125,7 +124,6 @@ class MmwaveConductorSensorPlugin :
   private: gz::math::Pose3d sensor_pose_{
       0.0, 0.0, 0.1, 3.1415, -1.57079632679, 0.0};
   private: double update_rate_hz_{30.0};
-  private: double min_point_dist_{kDefaultMinPointDist};
   private: double max_point_dist_{kDefaultMaxPointDist};
   private: double view_cone_slope_{kDefaultViewConeSlope};
   private: double plane_half_thickness_m_{kDefaultPlaneHalfThickness};
@@ -143,11 +141,8 @@ class MmwaveConductorSensorPlugin :
   private: std::vector<Conductor> conductors_;
   private: gz::math::Vector3d corridor_origin_world_{gz::math::Vector3d::Zero};
   private: gz::math::Vector3d corridor_span_axis_world_{gz::math::Vector3d::UnitX};
-  private: gz::math::Vector3d corridor_lateral_axis_world_{gz::math::Vector3d::UnitY};
   private: double corridor_min_span_{0.0};
   private: double corridor_max_span_{0.0};
-  private: double corridor_min_lateral_{0.0};
-  private: double corridor_max_lateral_{0.0};
   private: bool corridor_bounds_valid_{false};
   private: std::mt19937 random_generator_{std::random_device{}()};
   private: std::normal_distribution<double> unit_normal_{0.0, 1.0};
@@ -186,10 +181,6 @@ void MmwaveConductorSensorPlugin::Configure(
   if (sdf->HasElement("update_rate_hz"))
   {
     this->update_rate_hz_ = sdf->Get<double>("update_rate_hz");
-  }
-  if (sdf->HasElement("min_point_dist"))
-  {
-    this->min_point_dist_ = sdf->Get<double>("min_point_dist");
   }
   if (sdf->HasElement("max_point_dist"))
   {
@@ -292,7 +283,7 @@ void MmwaveConductorSensorPlugin::PostUpdate(
   std::vector<gz::math::Vector3d> points;
   points.reserve(this->conductors_.size());
 
-  if (!this->IsWithinCorridorFootprint(sensor_world_pose.Pos()))
+  if (!this->IsWithinConductorSpan(sensor_world_pose.Pos()))
   {
     this->PublishPointCloud(info.simTime, points);
     this->last_publish_time_ = info.simTime;
@@ -478,13 +469,8 @@ void MmwaveConductorSensorPlugin::UpdateCorridorBounds()
 
   this->corridor_origin_world_ = start_average;
   this->corridor_span_axis_world_ = span_axis;
-  this->corridor_lateral_axis_world_ =
-      gz::math::Vector3d{-span_axis.Y(), span_axis.X(), 0.0};
-
   this->corridor_min_span_ = std::numeric_limits<double>::infinity();
   this->corridor_max_span_ = -std::numeric_limits<double>::infinity();
-  this->corridor_min_lateral_ = std::numeric_limits<double>::infinity();
-  this->corridor_max_lateral_ = -std::numeric_limits<double>::infinity();
 
   for (const auto & conductor : this->conductors_)
   {
@@ -492,22 +478,17 @@ void MmwaveConductorSensorPlugin::UpdateCorridorBounds()
     {
       const gz::math::Vector3d relative = sample - this->corridor_origin_world_;
       const double span = relative.Dot(this->corridor_span_axis_world_);
-      const double lateral = relative.Dot(this->corridor_lateral_axis_world_);
       this->corridor_min_span_ = std::min(this->corridor_min_span_, span);
       this->corridor_max_span_ = std::max(this->corridor_max_span_, span);
-      this->corridor_min_lateral_ = std::min(this->corridor_min_lateral_, lateral);
-      this->corridor_max_lateral_ = std::max(this->corridor_max_lateral_, lateral);
     }
   }
 
   this->corridor_bounds_valid_ =
       std::isfinite(this->corridor_min_span_) &&
-      std::isfinite(this->corridor_max_span_) &&
-      std::isfinite(this->corridor_min_lateral_) &&
-      std::isfinite(this->corridor_max_lateral_);
+      std::isfinite(this->corridor_max_span_);
 }
 
-bool MmwaveConductorSensorPlugin::IsWithinCorridorFootprint(
+bool MmwaveConductorSensorPlugin::IsWithinConductorSpan(
     const gz::math::Vector3d & world_point) const
 {
   if (!this->corridor_bounds_valid_)
@@ -517,13 +498,10 @@ bool MmwaveConductorSensorPlugin::IsWithinCorridorFootprint(
 
   const gz::math::Vector3d relative = world_point - this->corridor_origin_world_;
   const double span = relative.Dot(this->corridor_span_axis_world_);
-  const double lateral = relative.Dot(this->corridor_lateral_axis_world_);
   const double margin = std::max(0.0, this->corridor_margin_m_);
 
   return span >= this->corridor_min_span_ - margin &&
-      span <= this->corridor_max_span_ + margin &&
-      lateral >= this->corridor_min_lateral_ - margin &&
-      lateral <= this->corridor_max_lateral_ + margin;
+      span <= this->corridor_max_span_ + margin;
 }
 
 std::optional<MmwaveConductorSensorPlugin::DetectionCandidate>
@@ -572,7 +550,7 @@ bool MmwaveConductorSensorPlugin::IsInFov(
     const gz::math::Vector3d & point_sensor) const
 {
   const double range = point_sensor.Length();
-  if (range < this->min_point_dist_ || range > this->max_point_dist_)
+  if (range > this->max_point_dist_)
   {
     return false;
   }
