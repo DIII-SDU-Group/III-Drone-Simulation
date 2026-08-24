@@ -14,7 +14,7 @@ This package provides:
 
 ### Launch Files
 
-- `launch/sensors_sim.launch.py`: starts the simulated sensor bridge nodes and the `depth_cam_to_mmwave` node
+- `launch/sim_assets.launch.py`: starts the simulated Gazebo asset bridge nodes, including `/clock`
 - `launch/tf_sim.launch.py`: starts static transform publishers and the drone frame broadcaster for simulation
 
 These launch files are the main integration points consumed by the larger III launch stack when simulation mode is enabled.
@@ -22,6 +22,9 @@ These launch files are the main integration points consumed by the larger III la
 ### Runtime Source
 
 - `src/depth_cam_to_mmwave.cpp`: converts simulated depth camera data into the mmWave-style output used elsewhere in the stack
+- `src/mmwave_conductor_sensor_plugin.cpp`: publishes conductor detections on
+  `/sensor/mmwave/points` and matching `x`, `y`, `z`, `velocity`, `snr`, and
+  `noise` fields on `/sensor/mmwave/points_full`
 
 ### Support Assets
 

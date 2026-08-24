@@ -1,13 +1,13 @@
 import importlib.util
-import os
 from pathlib import Path
+import xml.etree.ElementTree as ET
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
 from launch_ros.actions import Node
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
+WORKSPACE_ROOT = PACKAGE_ROOT.parents[1]
 
 
 def _load_module(relative_path: str):
@@ -48,38 +48,118 @@ def test_simulation_launch_files_generate_descriptions(tmp_path, monkeypatch):
     _write_config_tree(tmp_path)
     monkeypatch.setenv("CONFIG_BASE_DIR", str(tmp_path))
 
-    sensors_module = _load_module("launch/sensors_sim.launch.py")
+    sim_assets_module = _load_module("launch/sim_assets.launch.py")
     tf_module = _load_module("launch/tf_sim.launch.py")
 
-    sensors_description = sensors_module.generate_launch_description()
+    sim_assets_description = sim_assets_module.generate_launch_description()
     tf_description = tf_module.generate_launch_description()
 
-    assert isinstance(sensors_description, LaunchDescription)
+    assert isinstance(sim_assets_description, LaunchDescription)
     assert isinstance(tf_description, LaunchDescription)
-    assert len(sensors_description.entities) == 4
+    assert len(sim_assets_description.entities) == 8
     assert len(tf_description.entities) == 5
 
 
-def test_sensors_launch_contains_expected_nodes_and_argument(tmp_path, monkeypatch):
+def test_sim_assets_launch_contains_expected_bridge_nodes(tmp_path, monkeypatch):
     _write_config_tree(tmp_path)
     monkeypatch.setenv("CONFIG_BASE_DIR", str(tmp_path))
 
-    sensors_module = _load_module("launch/sensors_sim.launch.py")
-    description = sensors_module.generate_launch_description()
+    sim_assets_module = _load_module("launch/sim_assets.launch.py")
+    description = sim_assets_module.generate_launch_description()
 
-    assert isinstance(description.entities[0], DeclareLaunchArgument)
     nodes = [entity for entity in description.entities if isinstance(entity, Node)]
 
     assert [node._Node__node_name for node in nodes] == [
-        "depth_cam_to_mmwave",
+        "clock_gz_bridge",
         "camera_gz_bridge",
         "depth_cam_gz_bridge",
+        "mmwave_gz_bridge",
+        "mmwave_full_gz_bridge",
+        "ground_truth_odometry_gz_bridge",
+        "mmwave_labels_gz_bridge",
+        "conductor_id_map_gz_bridge",
     ]
     assert [node._Node__package for node in nodes] == [
-        "iii_drone_simulation",
+        "ros_gz_bridge",
+        "ros_gz_bridge",
+        "ros_gz_bridge",
+        "ros_gz_bridge",
+        "ros_gz_bridge",
+        "ros_gz_bridge",
         "ros_gz_bridge",
         "ros_gz_bridge",
     ]
+    assert nodes[0]._Node__arguments == [
+        "/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock"
+    ]
+    assert nodes[3]._Node__arguments == [
+        "/sensor/mmwave/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked"
+    ]
+    assert nodes[4]._Node__arguments == [
+        "/sensor/mmwave/points_full@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked"
+    ]
+    assert nodes[5]._Node__arguments == [
+        "/simulation/ground_truth/drone/odometry@nav_msgs/msg/Odometry[gz.msgs.Odometry"
+    ]
+    assert nodes[6]._Node__arguments == [
+        "/simulation/ground_truth/mmwave/conductor_labels@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked"
+    ]
+    assert nodes[7]._Node__arguments == [
+        "/simulation/ground_truth/conductor_id_map@std_msgs/msg/String[gz.msgs.StringMsg"
+    ]
+
+
+def test_drone_model_publishes_authoritative_3d_ground_truth_odometry():
+    model_path = (
+        PACKAGE_ROOT / "Gazebo-simulation-assets" / "models" / "d4s_dc_drone" / "model.sdf"
+    )
+    root = ET.parse(model_path).getroot()
+    plugins = root.findall(".//plugin[@name='gz::sim::systems::OdometryPublisher']")
+
+    assert len(plugins) == 1
+    plugin = plugins[0]
+    assert plugin.get("filename") == "gz-sim-odometry-publisher-system"
+    assert plugin.findtext("odom_frame") == "world"
+    assert plugin.findtext("robot_base_frame") == "drone"
+    assert plugin.findtext("dimensions") == "3"
+    assert plugin.findtext("odom_publish_frequency") == "100"
+    assert plugin.findtext("odom_topic") == "/simulation/ground_truth/drone/odometry"
+
+
+def test_drone_model_configures_measurement_provenance_topics():
+    model_path = (
+        PACKAGE_ROOT / "Gazebo-simulation-assets" / "models" / "d4s_dc_drone" / "model.sdf"
+    )
+    root = ET.parse(model_path).getroot()
+    plugins = root.findall(
+        ".//plugin[@name='iii_drone::simulation::MmwaveConductorSensorPlugin']"
+    )
+
+    assert len(plugins) == 1
+    plugin = plugins[0]
+    assert plugin.findtext("full_topic") == "/sensor/mmwave/points_full"
+    assert plugin.findtext("label_topic") == "/simulation/ground_truth/mmwave/conductor_labels"
+    assert plugin.findtext("camera_image_topic") == "/sensor/cable_camera/image_raw"
+    assert plugin.findtext("camera_mask_topic") == (
+        "/simulation/ground_truth/cable_camera/conductor_instance_mask"
+    )
+    assert plugin.findtext("conductor_id_map_topic") == (
+        "/simulation/ground_truth/conductor_id_map"
+    )
+
+
+def test_ground_truth_plugin_reads_simulator_state_and_publishes_typed_truth():
+    source = (PACKAGE_ROOT / "src" / "mmwave_conductor_sensor_plugin.cpp").read_text()
+
+    assert "WorldLinearVelocity(ecm)" in source
+    assert "WorldAngularVelocity(ecm)" in source
+    assert 'state.header.frame_id = "world"' in source
+    assert '"/simulation/ground_truth/drone/state"' in source
+    assert '"/simulation/ground_truth/conductors/geometry"' in source
+    assert '"/simulation/ground_truth/mmwave/scan"' in source
+    assert '"/simulation/ground_truth/cable_camera/frame"' in source
+    for forbidden in ("vehicle_odometry", "vehicle_local_position", "estimator_status"):
+        assert forbidden not in source
 
 
 def test_tf_launch_uses_frame_ids_from_configuration(tmp_path, monkeypatch):
@@ -120,3 +200,145 @@ def test_tf_launch_static_transform_argument_counts_use_production_config(monkey
     assert len(static_transform_nodes) == 3
     for node in static_transform_nodes:
         assert len(node._Node__arguments) in (8, 9)
+    assert static_transform_nodes[0]._Node__arguments[:6] == [
+        "0.0",
+        "0.0",
+        "0.4",
+        "1.57079632679",
+        "0.0",
+        "1.57079632679",
+    ]
+    assert static_transform_nodes[1]._Node__arguments[:6] == [
+        "0.025",
+        "-0.24",
+        "0.295",
+        "3.1415",
+        "-1.57079632679",
+        "0.0",
+    ]
+
+
+def test_conductor_asset_is_present_and_contains_four_conductors():
+    asset = (
+        PACKAGE_ROOT
+        / "Gazebo-simulation-assets"
+        / "world_models"
+        / "hcaa_pylon_setup"
+        / "conductors.yaml"
+    )
+
+    content = asset.read_text()
+
+    assert "frame_id: world" in content
+    assert content.count("- id: conductor_") == 4
+    assert content.count("samples:") == 4
+
+
+def test_px4_gazebo_model_has_continuous_magnetometer_source():
+    model_path = (
+        PACKAGE_ROOT
+        / "Gazebo-simulation-assets"
+        / "models"
+        / "d4s_dc_drone"
+        / "model.sdf"
+    )
+    airframe_path = (
+        PACKAGE_ROOT
+        / "Gazebo-simulation-assets"
+        / "init.d-posix_airframes"
+        / "99999_gz_d4s_dc_drone"
+    )
+    world_path = (
+        PACKAGE_ROOT
+        / "Gazebo-simulation-assets"
+        / "worlds"
+        / "hca_full_pylon_setup.sdf"
+    )
+
+    model = ET.parse(model_path).getroot()
+    world = ET.parse(world_path).getroot()
+    magnetometers = model.findall(".//sensor[@type='magnetometer']")
+    magnetometer_systems = world.findall(
+        ".//plugin[@name='gz::sim::systems::Magnetometer']"
+    )
+
+    assert len(magnetometers) == 1
+    assert magnetometers[0].get("name") == "magnetometer_sensor"
+    assert magnetometers[0].findtext("always_on") == "1"
+    assert magnetometers[0].findtext("update_rate") == "100"
+    assert len(magnetometer_systems) == 1
+    assert magnetometer_systems[0].get("filename") == "gz-sim-magnetometer-system"
+    assert "SENS_EN_MAGSIM" not in airframe_path.read_text()
+
+
+def test_sim_airframe_tolerates_short_mavlink_joystick_gaps():
+    airframe_path = (
+        PACKAGE_ROOT
+        / "Gazebo-simulation-assets"
+        / "init.d-posix_airframes"
+        / "99999_gz_d4s_dc_drone"
+    )
+
+    assert "param set-default COM_RC_LOSS_T 5.0" in airframe_path.read_text()
+
+
+def test_asset_airframe_matches_px4_romfs_copy():
+    asset_airframe = (
+        PACKAGE_ROOT
+        / "Gazebo-simulation-assets"
+        / "init.d-posix_airframes"
+        / "99999_gz_d4s_dc_drone"
+    )
+    px4_airframe = (
+        WORKSPACE_ROOT
+        / "PX4-Autopilot"
+        / "ROMFS"
+        / "px4fmu_common"
+        / "init.d-posix"
+        / "airframes"
+        / "99999_gz_d4s_dc_drone"
+    )
+
+    assert px4_airframe.read_bytes() == asset_airframe.read_bytes()
+
+
+def test_simulated_gripper_aligns_with_drone_yaw_and_engages_support_smoothly():
+    model_path = (
+        PACKAGE_ROOT
+        / "Gazebo-simulation-assets"
+        / "models"
+        / "d4s_dc_drone"
+        / "model.sdf"
+    )
+    model = ET.parse(model_path).getroot()
+    plugin = model.find(
+        ".//plugin[@name='iii_drone::simulation::SimChargerGripperPlugin']"
+    )
+
+    assert plugin is not None
+    gripper_pose = [float(value) for value in plugin.findtext("gripper_pose").split()]
+    assert gripper_pose[5] == 1.57079632679
+    assert float(plugin.findtext("latch_radius")) <= 0.04
+    assert float(plugin.findtext("support_ramp_duration_s")) > 0.0
+
+
+def test_canonical_simulation_launcher_requires_exact_tmux_session_name():
+    launcher = WORKSPACE_ROOT / "tools" / "simulation" / "launch_simulation_tools.sh"
+
+    assert 'tmux_command has-session -t "=${SESSION_NAME}"' in launcher.read_text()
+
+
+def test_canonical_simulation_status_probes_gazebo_as_session_user():
+    launcher = WORKSPACE_ROOT / "tools" / "simulation" / "launch_simulation_tools.sh"
+    source = launcher.read_text()
+
+    assert "session_user_command timeout" in source
+    assert "source '${WORKSPACE_ROOT}/setup/setup_dev.bash' && gz service" in source
+
+
+def test_canonical_simulation_recreate_clears_selected_instance_parameters():
+    launcher = WORKSPACE_ROOT / "tools" / "simulation" / "launch_simulation_tools.sh"
+    source = launcher.read_text()
+
+    assert '"${rootfs}/${PX4_INSTANCE}/parameters.bson"' in source
+    assert '"${rootfs}/${PX4_INSTANCE}/parameters_backup.bson"' in source
