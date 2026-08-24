@@ -282,6 +282,26 @@ def test_sim_airframe_tolerates_short_mavlink_joystick_gaps():
     assert "param set-default COM_RC_LOSS_T 5.0" in airframe_path.read_text()
 
 
+def test_asset_airframe_matches_px4_romfs_copy():
+    asset_airframe = (
+        PACKAGE_ROOT
+        / "Gazebo-simulation-assets"
+        / "init.d-posix_airframes"
+        / "99999_gz_d4s_dc_drone"
+    )
+    px4_airframe = (
+        WORKSPACE_ROOT
+        / "PX4-Autopilot"
+        / "ROMFS"
+        / "px4fmu_common"
+        / "init.d-posix"
+        / "airframes"
+        / "99999_gz_d4s_dc_drone"
+    )
+
+    assert px4_airframe.read_bytes() == asset_airframe.read_bytes()
+
+
 def test_simulated_gripper_aligns_with_drone_yaw_and_engages_support_smoothly():
     model_path = (
         PACKAGE_ROOT
