@@ -57,6 +57,7 @@ public:
     this->declare_parameter<double>("fully_charged_remaining_pct", 0.98);
     this->declare_parameter<std::string>("gz_command_topic", "/sim/charger_gripper/command");
     this->declare_parameter<std::string>("gz_state_topic", "/sim/charger_gripper/state");
+    this->declare_parameter<double>("gz_state_timeout_s", 1.0);
 
     this->status_publish_rate_hz_ = this->get_parameter("status_publish_rate_hz").as_double();
     this->px4_battery_status_timeout_s_ =
@@ -84,6 +85,7 @@ public:
       this->get_parameter("px4_battery_charge_topic").as_string();
     this->gz_command_topic_ = this->get_parameter("gz_command_topic").as_string();
     this->gz_state_topic_ = this->get_parameter("gz_state_topic").as_string();
+    this->gz_state_timeout_s_ = this->get_parameter("gz_state_timeout_s").as_double();
     this->last_update_time_ = this->now();
   }
 
@@ -146,6 +148,7 @@ private:
     this->last_logged_triggered_ = false;
     this->last_logged_latched_ = false;
     this->charging_power_w_ = 0.0;
+    this->last_gz_state_steady_ns_.store(0);
     this->last_update_time_ = this->now();
     this->status_publish_count_ = 0;
     RCLCPP_INFO(this->get_logger(), "Simulated charger gripper configured.");
@@ -182,6 +185,7 @@ private:
     this->latched_ = false;
     this->triggered_ = false;
     this->charging_power_w_ = 0.0;
+    this->last_gz_state_steady_ns_.store(0);
     this->SendGzCommand("open");
 
     this->gripper_status_pub_->on_deactivate();
@@ -208,6 +212,7 @@ private:
     this->latched_ = false;
     this->triggered_ = false;
     this->charging_power_w_ = 0.0;
+    this->last_gz_state_steady_ns_.store(0);
     return CallbackReturn::SUCCESS;
   }
 
@@ -257,6 +262,9 @@ private:
 
   void OnGzState(const gz::msgs::StringMsg & msg)
   {
+    this->last_gz_state_steady_ns_.store(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count());
     const auto & data = msg.data();
     if (this->sim_state_pub_) {
       std_msgs::msg::String sim_state;
@@ -422,19 +430,38 @@ private:
     return this->BatteryVoltage() >= this->fully_charged_voltage_v_;
   }
 
+  bool LatchConfirmed() const
+  {
+    if (!this->latched_) {
+      return false;
+    }
+    const auto last_state_ns = this->last_gz_state_steady_ns_.load();
+    if (last_state_ns <= 0) {
+      return false;
+    }
+    const auto now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+      std::chrono::steady_clock::now().time_since_epoch()).count();
+    return static_cast<double>(now_ns - last_state_ns) / 1e9 <= this->gz_state_timeout_s_;
+  }
+
   void UpdateStateAndPower()
   {
     const auto now = this->now();
     const auto dt = std::max(0.001, (now - this->last_update_time_).seconds());
     this->last_update_time_ = now;
 
-    if (!this->latched_ && (this->state_ == State::Latched ||
+    const bool latch_confirmed = this->LatchConfirmed();
+    if (!latch_confirmed && (this->state_ == State::Latched ||
         this->state_ == State::Charging || this->state_ == State::FullyCharged))
     {
-      this->state_ = State::Open;
+      this->state_ = State::ArmedToClose;
     }
 
-    if (this->state_ == State::Latched) {
+    if (latch_confirmed && this->state_ == State::ArmedToClose) {
+      this->state_ = State::Latched;
+    }
+
+    if (latch_confirmed && this->state_ == State::Latched) {
       this->state_ = this->BatteryFull() ? State::FullyCharged : State::Charging;
     }
 
@@ -444,6 +471,11 @@ private:
 
     if (this->state_ == State::FullyCharged && !this->BatteryFull()) {
       this->state_ = State::Charging;
+    }
+
+    if (!latch_confirmed) {
+      this->charging_power_w_ = 0.0;
+      return;
     }
 
     double target_power_w = 0.0;
@@ -472,8 +504,9 @@ private:
     this->UpdateStateAndPower();
 
     iii_drone_interfaces::msg::GripperStatus gripper_status;
+    const bool latch_confirmed = this->LatchConfirmed();
     gripper_status.gripper_status =
-      this->latched_ ?
+      latch_confirmed ?
       iii_drone_interfaces::msg::GripperStatus::GRIPPER_STATUS_CLOSED :
       iii_drone_interfaces::msg::GripperStatus::GRIPPER_STATUS_OPEN;
     this->gripper_status_pub_->publish(gripper_status);
@@ -500,15 +533,16 @@ private:
     this->charger_status_pub_->publish(charger_status);
 
     iii_drone_interfaces::msg::ChargerOperatingMode mode;
-    mode.operating_mode = this->latched_ ?
+    mode.operating_mode = latch_confirmed ?
       iii_drone_interfaces::msg::ChargerOperatingMode::OPERATING_MODE_1 :
       iii_drone_interfaces::msg::ChargerOperatingMode::OPERATING_MODE_OPEN;
     this->charger_operating_mode_pub_->publish(mode);
 
     px4_msgs::msg::SimBatteryCharge charge;
     charge.timestamp = this->now().nanoseconds() / 1000;
-    charge.charging_enabled = this->charging_power_w_ > 0.1;
-    charge.charging_power_w = static_cast<float>(this->charging_power_w_);
+    charge.charging_enabled = latch_confirmed && this->charging_power_w_ > 0.1;
+    charge.charging_power_w = charge.charging_enabled ?
+      static_cast<float>(this->charging_power_w_) : 0.0f;
     this->px4_charge_pub_->publish(charge);
 
     ++this->status_publish_count_;
@@ -549,6 +583,8 @@ private:
   std::string px4_battery_charge_topic_;
   std::string gz_command_topic_;
   std::string gz_state_topic_;
+  double gz_state_timeout_s_{1.0};
+  std::atomic<int64_t> last_gz_state_steady_ns_{0};
   gz::transport::Node gz_node_;
   gz::transport::Node::Publisher gz_command_pub_;
   std::mutex gz_command_mutex_;

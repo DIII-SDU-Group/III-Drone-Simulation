@@ -81,7 +81,6 @@ add_library(iii_drone_mmwave_conductor_sensor_plugin SHARED
 )
 target_compile_features(iii_drone_mmwave_conductor_sensor_plugin PRIVATE cxx_std_17)
 target_link_libraries(iii_drone_mmwave_conductor_sensor_plugin
-  PRIVATE
     ${III_DRONE_SIMULATION_GZ_SIM_TARGET}
     gz-plugin2::requested
     ${III_DRONE_SIMULATION_GZ_MSGS_TARGET}
@@ -89,6 +88,11 @@ target_link_libraries(iii_drone_mmwave_conductor_sensor_plugin
     gz-common5::requested
     gz-math7::core
     ${III_DRONE_SIMULATION_YAML_CPP_TARGET}
+)
+ament_target_dependencies(iii_drone_mmwave_conductor_sensor_plugin
+  rclcpp
+  sensor_msgs
+  iii_drone_interfaces
 )
 install(TARGETS iii_drone_mmwave_conductor_sensor_plugin DESTINATION lib)
 

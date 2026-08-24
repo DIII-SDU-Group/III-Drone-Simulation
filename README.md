@@ -22,6 +22,9 @@ These launch files are the main integration points consumed by the larger III la
 ### Runtime Source
 
 - `src/depth_cam_to_mmwave.cpp`: converts simulated depth camera data into the mmWave-style output used elsewhere in the stack
+- `src/mmwave_conductor_sensor_plugin.cpp`: publishes conductor detections on
+  `/sensor/mmwave/points` and matching `x`, `y`, `z`, `velocity`, `snr`, and
+  `noise` fields on `/sensor/mmwave/points_full`
 
 ### Support Assets
 

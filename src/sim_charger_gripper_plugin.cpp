@@ -154,6 +154,10 @@ public:
     if (sdf->HasElement("support_force_limit")) {
       this->support_force_limit_ = sdf->Get<double>("support_force_limit");
     }
+    if (sdf->HasElement("support_ramp_duration_s")) {
+      this->support_ramp_duration_s_ = std::max(
+        0.0, sdf->Get<double>("support_ramp_duration_s"));
+    }
 
     this->ReadBox(sdf, "capture", this->capture_box_);
 
@@ -210,6 +214,8 @@ public:
       if (!this->armed_) {
         this->latched_ = false;
         this->trigger_started_ = std::chrono::steady_clock::duration::min();
+        this->latched_at_ = std::chrono::steady_clock::duration::min();
+        this->support_ramp_scale_ = 0.0;
       } else if (!this->latched_) {
         if (capture_ready) {
           if (this->trigger_started_ == std::chrono::steady_clock::duration::min()) {
@@ -220,6 +226,7 @@ public:
             this->latched_ = true;
             this->latched_conductor_id_ = detection.conductor_id;
             this->latch_point_world_ = detection.closest_point_world;
+            this->latched_at_ = info.simTime;
           }
         } else {
           this->trigger_started_ = std::chrono::steady_clock::duration::min();
@@ -227,7 +234,7 @@ public:
       }
 
       if (this->latched_) {
-        this->ApplySupportForce(ecm, gripper_world_pose);
+        this->ApplySupportForce(ecm, gripper_world_pose, info.simTime);
       }
     }
 
@@ -382,7 +389,8 @@ private:
 
   void ApplySupportForce(
     gz::sim::EntityComponentManager & ecm,
-    const gz::math::Pose3d & gripper_world_pose)
+    const gz::math::Pose3d & gripper_world_pose,
+    const std::chrono::steady_clock::duration sim_time)
   {
     const auto linear_velocity =
       this->link_.WorldLinearVelocity(ecm).value_or(gz::math::Vector3d::Zero);
@@ -404,9 +412,22 @@ private:
 
     // A single compliant contact force at the gripper latch point lets gravity
     // rotate the vehicle naturally until its center of mass hangs below the cable.
-    auto latch_force =
+    double ramp_scale = 1.0;
+    if (
+      this->support_ramp_duration_s_ > 0.0 &&
+      this->latched_at_ != std::chrono::steady_clock::duration::min())
+    {
+      const double elapsed_s =
+        std::chrono::duration<double>(sim_time - this->latched_at_).count();
+      const double progress = std::clamp(
+        elapsed_s / this->support_ramp_duration_s_, 0.0, 1.0);
+      ramp_scale = progress * progress * (3.0 - 2.0 * progress);
+    }
+    this->support_ramp_scale_ = ramp_scale;
+
+    auto latch_force = (
       position_error * this->support_stiffness_ -
-      point_velocity * this->support_damping_;
+      point_velocity * this->support_damping_) * ramp_scale;
 
     const double force_length = latch_force.Length();
     if (force_length > this->support_force_limit_) {
@@ -424,6 +445,8 @@ private:
       this->latched_ = false;
       this->latched_conductor_id_.clear();
       this->trigger_started_ = std::chrono::steady_clock::duration::min();
+      this->latched_at_ = std::chrono::steady_clock::duration::min();
+      this->support_ramp_scale_ = 0.0;
     } else if (msg.data() == "armed") {
       this->armed_ = true;
     }
@@ -438,11 +461,13 @@ private:
   {
     bool armed = false;
     bool latched = false;
+    double support_ramp_scale = 0.0;
     std::string latched_conductor;
     {
       std::lock_guard<std::mutex> lock(this->mutex_);
       armed = this->armed_;
       latched = this->latched_;
+      support_ramp_scale = this->support_ramp_scale_;
       latched_conductor = this->latched_conductor_id_;
     }
 
@@ -471,6 +496,7 @@ private:
          << ";latch_radius=" << this->latch_radius_
          << ";latch_along_tolerance=" << this->latch_along_tolerance_
          << ";conductor_radius=" << this->conductor_radius_
+         << ";support_ramp_scale=" << support_ramp_scale
          << ";seated_error=" << detection.closest_cross_distance
          << ";";
     msg.set_data(data.str());
@@ -489,6 +515,7 @@ private:
   std::string state_topic_{"/sim/charger_gripper/state"};
   std::chrono::steady_clock::duration required_contact_duration_{std::chrono::milliseconds(100)};
   std::chrono::steady_clock::duration trigger_started_{std::chrono::steady_clock::duration::min()};
+  std::chrono::steady_clock::duration latched_at_{std::chrono::steady_clock::duration::min()};
   std::chrono::steady_clock::duration publish_period_{std::chrono::milliseconds(50)};
   std::chrono::steady_clock::duration last_publish_time_{std::chrono::steady_clock::duration::min()};
   gz::math::Vector3d latch_local_point_{0.0, 0.0, 0.0};
@@ -507,6 +534,8 @@ private:
   double support_stiffness_{600.0};
   double support_damping_{80.0};
   double support_force_limit_{250.0};
+  double support_ramp_duration_s_{0.35};
+  double support_ramp_scale_{0.0};
 };
 
 }  // namespace iii_drone::simulation
