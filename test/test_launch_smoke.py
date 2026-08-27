@@ -12,7 +12,9 @@ WORKSPACE_ROOT = PACKAGE_ROOT.parents[1]
 
 def _load_module(relative_path: str):
     module_path = PACKAGE_ROOT / relative_path
-    spec = importlib.util.spec_from_file_location(module_path.stem.replace(".", "_"), module_path)
+    spec = importlib.util.spec_from_file_location(
+        module_path.stem.replace(".", "_"), module_path
+    )
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(module)
@@ -27,8 +29,7 @@ def _write_config_tree(base_dir: Path):
     parameter_set_dir.mkdir(parents=True, exist_ok=True)
 
     (profiles_dir / "sim.yaml").write_text(
-        "version: 1\n"
-        "active_parameter_set: tracked/default.yaml\n"
+        "version: 1\n" "active_parameter_set: tracked/default.yaml\n"
     )
 
     (parameter_set_dir / "default.yaml").write_text(
@@ -89,9 +90,7 @@ def test_sim_assets_launch_contains_expected_bridge_nodes(tmp_path, monkeypatch)
         "ros_gz_bridge",
         "ros_gz_bridge",
     ]
-    assert nodes[0]._Node__arguments == [
-        "/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock"
-    ]
+    assert nodes[0]._Node__arguments == ["/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock"]
     assert nodes[3]._Node__arguments == [
         "/sensor/mmwave/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked"
     ]
@@ -111,7 +110,11 @@ def test_sim_assets_launch_contains_expected_bridge_nodes(tmp_path, monkeypatch)
 
 def test_drone_model_publishes_authoritative_3d_ground_truth_odometry():
     model_path = (
-        PACKAGE_ROOT / "Gazebo-simulation-assets" / "models" / "d4s_dc_drone" / "model.sdf"
+        PACKAGE_ROOT
+        / "Gazebo-simulation-assets"
+        / "models"
+        / "d4s_dc_drone"
+        / "model.sdf"
     )
     root = ET.parse(model_path).getroot()
     plugins = root.findall(".//plugin[@name='gz::sim::systems::OdometryPublisher']")
@@ -128,7 +131,11 @@ def test_drone_model_publishes_authoritative_3d_ground_truth_odometry():
 
 def test_drone_model_configures_measurement_provenance_topics():
     model_path = (
-        PACKAGE_ROOT / "Gazebo-simulation-assets" / "models" / "d4s_dc_drone" / "model.sdf"
+        PACKAGE_ROOT
+        / "Gazebo-simulation-assets"
+        / "models"
+        / "d4s_dc_drone"
+        / "model.sdf"
     )
     root = ET.parse(model_path).getroot()
     plugins = root.findall(
@@ -138,7 +145,10 @@ def test_drone_model_configures_measurement_provenance_topics():
     assert len(plugins) == 1
     plugin = plugins[0]
     assert plugin.findtext("full_topic") == "/sensor/mmwave/points_full"
-    assert plugin.findtext("label_topic") == "/simulation/ground_truth/mmwave/conductor_labels"
+    assert (
+        plugin.findtext("label_topic")
+        == "/simulation/ground_truth/mmwave/conductor_labels"
+    )
     assert plugin.findtext("camera_image_topic") == "/sensor/cable_camera/image_raw"
     assert plugin.findtext("camera_mask_topic") == (
         "/simulation/ground_truth/cable_camera/conductor_instance_mask"
@@ -193,8 +203,10 @@ def test_tf_launch_static_transform_argument_counts_use_production_config(monkey
     tf_module = _load_module("launch/tf_sim.launch.py")
     description = tf_module.generate_launch_description()
     static_transform_nodes = [
-        entity for entity in description.entities
-        if isinstance(entity, Node) and entity._Node__node_executable == "static_transform_publisher"
+        entity
+        for entity in description.entities
+        if isinstance(entity, Node)
+        and entity._Node__node_executable == "static_transform_publisher"
     ]
 
     assert len(static_transform_nodes) == 3
@@ -342,3 +354,22 @@ def test_canonical_simulation_recreate_clears_selected_instance_parameters():
 
     assert '"${rootfs}/${PX4_INSTANCE}/parameters.bson"' in source
     assert '"${rootfs}/${PX4_INSTANCE}/parameters_backup.bson"' in source
+
+
+def test_simulation_launcher_never_owns_qgroundcontrol_and_declares_host_udp_transport():
+    launcher = WORKSPACE_ROOT / "tools" / "simulation" / "launch_simulation_tools.sh"
+    source = launcher.read_text()
+    dockerfile = (WORKSPACE_ROOT / "Dockerfile.dev").read_text()
+    devcontainer = (WORKSPACE_ROOT / ".devcontainer/devcontainer.json").read_text()
+
+    assert "QGC_COMMAND" not in source
+    assert "QGroundControl.AppImage" not in source
+    assert 'HOST_QGC_UDP_PORT="${III_SIM_TOOLS_HOST_QGC_UDP_PORT:-14550}"' in source
+    assert "host_qgc_udp_listener" in source
+    assert "lifecycle owned by iii qgc" in source
+    assert "QGroundControl.AppImage" not in dockerfile
+    assert "tools/QGroundControl.org" not in dockerfile
+    assert '"--network","host"' in devcontainer
+    assert not (
+        WORKSPACE_ROOT / "tools/simulation/managed_qgroundcontrol_config.yaml"
+    ).exists()
