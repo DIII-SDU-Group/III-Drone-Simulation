@@ -31,7 +31,6 @@ def _write_config_tree(base_dir: Path):
     (profiles_dir / "sim.yaml").write_text(
         "version: 1\n" "active_parameter_set: tracked/default.yaml\n"
     )
-
     (parameter_set_dir / "default.yaml").write_text(
         "/**:\n"
         "  ros__parameters:\n"
@@ -45,9 +44,14 @@ def _write_config_tree(base_dir: Path):
     )
 
 
+def _isolate_runtime_state(base_dir: Path, monkeypatch):
+    _write_config_tree(base_dir)
+    monkeypatch.setenv("CONFIG_BASE_DIR", str(base_dir))
+    monkeypatch.setenv("III_OPERATIONS_ROOT", str(base_dir / "operations"))
+
+
 def test_simulation_launch_files_generate_descriptions(tmp_path, monkeypatch):
-    _write_config_tree(tmp_path)
-    monkeypatch.setenv("CONFIG_BASE_DIR", str(tmp_path))
+    _isolate_runtime_state(tmp_path, monkeypatch)
 
     sim_assets_module = _load_module("launch/sim_assets.launch.py")
     tf_module = _load_module("launch/tf_sim.launch.py")
@@ -62,8 +66,7 @@ def test_simulation_launch_files_generate_descriptions(tmp_path, monkeypatch):
 
 
 def test_sim_assets_launch_contains_expected_bridge_nodes(tmp_path, monkeypatch):
-    _write_config_tree(tmp_path)
-    monkeypatch.setenv("CONFIG_BASE_DIR", str(tmp_path))
+    _isolate_runtime_state(tmp_path, monkeypatch)
 
     sim_assets_module = _load_module("launch/sim_assets.launch.py")
     description = sim_assets_module.generate_launch_description()
@@ -173,8 +176,7 @@ def test_ground_truth_plugin_reads_simulator_state_and_publishes_typed_truth():
 
 
 def test_tf_launch_uses_frame_ids_from_configuration(tmp_path, monkeypatch):
-    _write_config_tree(tmp_path)
-    monkeypatch.setenv("CONFIG_BASE_DIR", str(tmp_path))
+    _isolate_runtime_state(tmp_path, monkeypatch)
 
     tf_module = _load_module("launch/tf_sim.launch.py")
     description = tf_module.generate_launch_description()
