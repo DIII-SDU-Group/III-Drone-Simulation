@@ -1,6 +1,7 @@
 from launch import LaunchDescription
 from launch.substitutions import LaunchConfiguration
 from launch.actions import DeclareLaunchArgument
+from launch.conditions import IfCondition, UnlessCondition
 from launch_ros.actions import Node
 import yaml
 
@@ -17,11 +18,17 @@ def _parameter_sources() -> list[object]:
 
 def generate_launch_description():
     drone_frame_broadcaster_log_level = LaunchConfiguration("drone_frame_broadcaster_log_level")
+    use_ground_truth_odometry = LaunchConfiguration("use_ground_truth_odometry")
 
     drone_frame_broadcaster_log_level_arg = DeclareLaunchArgument(
         "drone_frame_broadcaster_log_level",
         default_value=["info"],
         description="The logging level for the drone frame broadcaster node, default is INFO",
+    )
+    use_ground_truth_odometry_arg = DeclareLaunchArgument(
+        "use_ground_truth_odometry",
+        default_value="false",
+        description="Publish world-to-drone TF from Gazebo ground truth instead of PX4 uXRCE odometry",
     )
     
     ros_params = _resolve_ros_params_file()
@@ -63,12 +70,28 @@ def generate_launch_description():
         executable="drone_frame_broadcaster",
         arguments=["--ros-args", "--log-level", drone_frame_broadcaster_log_level],
         parameters=_parameter_sources(),
+        condition=UnlessCondition(use_ground_truth_odometry),
+    )
+
+    ground_truth_world_to_drone = Node(
+        package="iii_drone_simulation",
+        executable="ground_truth_frame_broadcaster",
+        parameters=[
+            {
+                "use_sim_time": True,
+                "world_frame_id": params["/tf/world_frame_id"],
+                "drone_frame_id": drone_frame_id,
+            }
+        ],
+        condition=IfCondition(use_ground_truth_odometry),
     )
 
     return LaunchDescription([
         drone_frame_broadcaster_log_level_arg,
+        use_ground_truth_odometry_arg,
         tf_drone_to_cable_gripper,
         tf_drone_to_iwr,
         tf_drone_to_depth_cam,
         world_to_drone,
+        ground_truth_world_to_drone,
     ])

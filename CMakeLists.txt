@@ -122,6 +122,11 @@ install(TARGETS iii_drone_sim_charger_gripper_plugin DESTINATION lib)
 ############
 # Export information to downstream packages
 ament_python_install_package(${PROJECT_NAME})
+install(PROGRAMS
+  iii_drone_simulation/ground_truth_frame_broadcaster.py
+  DESTINATION lib/${PROJECT_NAME}
+  RENAME ground_truth_frame_broadcaster
+)
 
 # Export information to downstream packages
 if(ROS_DISTRO IN_LIST ROS_DISTROS)

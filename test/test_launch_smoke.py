@@ -2,6 +2,7 @@ import importlib.util
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
+import pytest
 from launch import LaunchDescription
 from launch_ros.actions import Node
 
@@ -35,6 +36,7 @@ def _write_config_tree(base_dir: Path):
         "/**:\n"
         "  ros__parameters:\n"
         "    /tf/drone_frame_id: drone\n"
+        "    /tf/world_frame_id: world\n"
         "    /tf/cable_gripper_frame_id: cable_gripper\n"
         "    /tf/mmwave_frame_id: mmwave\n"
         "    /tf/sim/depth_cam_frame_id: depth_camera\n"
@@ -62,7 +64,7 @@ def test_simulation_launch_files_generate_descriptions(tmp_path, monkeypatch):
     assert isinstance(sim_assets_description, LaunchDescription)
     assert isinstance(tf_description, LaunchDescription)
     assert len(sim_assets_description.entities) == 8
-    assert len(tf_description.entities) == 5
+    assert len(tf_description.entities) == 7
 
 
 def test_sim_assets_launch_contains_expected_bridge_nodes(tmp_path, monkeypatch):
@@ -175,6 +177,39 @@ def test_ground_truth_plugin_reads_simulator_state_and_publishes_typed_truth():
         assert forbidden not in source
 
 
+def test_ground_truth_tf_converts_gazebo_enu_to_iii_world():
+    from iii_drone_simulation.ground_truth_frame_broadcaster import (
+        gazebo_enu_pose_to_iii_world,
+    )
+
+    # Exact convention boundary observed in HIL: Gazebo east/north becomes
+    # III north/west, and an ENU heading of pi/2 becomes III yaw zero.
+    converted = gazebo_enu_pose_to_iii_world(
+        -1.4,
+        2.2,
+        3.0,
+        0.0,
+        0.0,
+        2**-0.5,
+        2**-0.5,
+    )
+
+    assert converted[:3] == (2.2, 1.4, 3.0)
+    assert converted[3] == pytest.approx(0.0, abs=1e-12)
+    assert converted[4] == pytest.approx(0.0, abs=1e-12)
+    assert converted[5] == pytest.approx(0.0, abs=1e-12)
+    assert converted[6] == pytest.approx(1.0, abs=1e-12)
+
+
+def test_sim_gripper_gazebo_callback_is_thread_safe_and_wall_time_throttled():
+    source = (PACKAGE_ROOT / "src" / "sim_charger_gripper_node.cpp").read_text()
+
+    assert "gz_state_mutex_" in source
+    assert "last_gz_log_steady_ns_" in source
+    assert "std::chrono::steady_clock" in source
+    assert "RCLCPP_INFO_THROTTLE" not in source
+
+
 def test_tf_launch_uses_frame_ids_from_configuration(tmp_path, monkeypatch):
     _isolate_runtime_state(tmp_path, monkeypatch)
 
@@ -183,11 +218,20 @@ def test_tf_launch_uses_frame_ids_from_configuration(tmp_path, monkeypatch):
     nodes = [entity for entity in description.entities if isinstance(entity, Node)]
 
     assert description.entities[0].name == "drone_frame_broadcaster_log_level"
+    assert description.entities[1].name == "use_ground_truth_odometry"
     assert nodes[0]._Node__arguments[-2:] == ["drone", "cable_gripper"]
     assert nodes[1]._Node__arguments[-2:] == ["drone", "mmwave"]
     assert nodes[2]._Node__arguments[-2:] == ["drone", "depth_camera"]
     assert nodes[3]._Node__package == "iii_drone_core"
     assert nodes[3]._Node__node_executable == "drone_frame_broadcaster"
+    assert nodes[4]._Node__package == "iii_drone_simulation"
+    assert nodes[4]._Node__node_executable == "ground_truth_frame_broadcaster"
+
+
+def test_hil_launcher_selects_ground_truth_tf_source():
+    launcher = (WORKSPACE_ROOT / "tools" / "simulation" / "launch_hil_workstation.sh").read_text()
+
+    assert "tf_sim.launch.py use_ground_truth_odometry:=true" in launcher
 
 
 def test_tf_launch_static_transform_argument_counts_use_production_config(monkeypatch):
@@ -296,6 +340,17 @@ def test_sim_airframe_tolerates_short_mavlink_joystick_gaps():
     assert "param set-default COM_RC_LOSS_T 5.0" in airframe_path.read_text()
 
 
+def test_sim_airframe_endurance_covers_full_inspection_acceptance_cycle():
+    airframe_path = (
+        PACKAGE_ROOT
+        / "Gazebo-simulation-assets"
+        / "init.d-posix_airframes"
+        / "99999_gz_d4s_dc_drone"
+    )
+
+    assert "param set-default SIM_BAT_DRAIN 300" in airframe_path.read_text()
+
+
 def test_asset_airframe_matches_px4_romfs_copy():
     asset_airframe = (
         PACKAGE_ROOT
@@ -338,8 +393,13 @@ def test_simulated_gripper_aligns_with_drone_yaw_and_engages_support_smoothly():
 
 def test_canonical_simulation_launcher_requires_exact_tmux_session_name():
     launcher = WORKSPACE_ROOT / "tools" / "simulation" / "launch_simulation_tools.sh"
+    source = launcher.read_text()
 
-    assert 'tmux_command has-session -t "=${SESSION_NAME}"' in launcher.read_text()
+    assert 'tmux_command has-session -t "=${SESSION_NAME}"' in source
+    process_group_function = source.split("px4_simulation_process_groups()", 1)[1].split(
+        "cleanup_stale_px4_simulation()", 1
+    )[0]
+    assert "return 0" in process_group_function
 
 
 def test_canonical_simulation_status_probes_gazebo_as_session_user():

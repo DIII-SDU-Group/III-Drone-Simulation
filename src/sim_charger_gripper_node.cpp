@@ -147,6 +147,7 @@ private:
     this->last_logged_armed_ = false;
     this->last_logged_triggered_ = false;
     this->last_logged_latched_ = false;
+    this->last_gz_log_steady_ns_ = 0;
     this->charging_power_w_ = 0.0;
     this->last_gz_state_steady_ns_.store(0);
     this->last_update_time_ = this->now();
@@ -181,10 +182,13 @@ private:
   CallbackReturn on_deactivate(const rclcpp_lifecycle::State &) override
   {
     this->status_timer_.reset();
-    this->state_ = State::Open;
-    this->latched_ = false;
-    this->triggered_ = false;
-    this->charging_power_w_ = 0.0;
+    {
+      std::lock_guard<std::mutex> lock(this->gz_state_mutex_);
+      this->state_ = State::Open;
+      this->latched_ = false;
+      this->triggered_ = false;
+      this->charging_power_w_ = 0.0;
+    }
     this->last_gz_state_steady_ns_.store(0);
     this->SendGzCommand("open");
 
@@ -208,10 +212,13 @@ private:
     this->charger_status_pub_.reset();
     this->charger_operating_mode_pub_.reset();
     this->px4_charge_pub_.reset();
-    this->state_ = State::Open;
-    this->latched_ = false;
-    this->triggered_ = false;
-    this->charging_power_w_ = 0.0;
+    {
+      std::lock_guard<std::mutex> lock(this->gz_state_mutex_);
+      this->state_ = State::Open;
+      this->latched_ = false;
+      this->triggered_ = false;
+      this->charging_power_w_ = 0.0;
+    }
     this->last_gz_state_steady_ns_.store(0);
     return CallbackReturn::SUCCESS;
   }
@@ -230,11 +237,14 @@ private:
     if (request->gripper_command ==
       iii_drone_interfaces::srv::GripperCommand::Request::GRIPPER_COMMAND_OPEN)
     {
-      this->state_ = State::Open;
-      this->latched_ = false;
-      this->triggered_ = false;
+      {
+        std::lock_guard<std::mutex> lock(this->gz_state_mutex_);
+        this->state_ = State::Open;
+        this->latched_ = false;
+        this->triggered_ = false;
+        this->charging_power_w_ = 0.0;
+      }
       RCLCPP_INFO(this->get_logger(), "Gripper command OPEN: clearing latch and disarming Gazebo latch.");
-      this->charging_power_w_ = 0.0;
       response->gripper_command_response =
         this->SendGzCommand("open") ?
         iii_drone_interfaces::srv::GripperCommand::Response::GRIPPER_COMMAND_RESPONSE_SUCCESS :
@@ -245,8 +255,11 @@ private:
     if (request->gripper_command ==
       iii_drone_interfaces::srv::GripperCommand::Request::GRIPPER_COMMAND_CLOSE)
     {
-      if (this->state_ == State::Open) {
-        this->state_ = State::ArmedToClose;
+      {
+        std::lock_guard<std::mutex> lock(this->gz_state_mutex_);
+        if (this->state_ == State::Open) {
+          this->state_ = State::ArmedToClose;
+        }
       }
       RCLCPP_INFO(this->get_logger(), "Gripper command CLOSE: arming Gazebo latch.");
       response->gripper_command_response =
@@ -262,9 +275,9 @@ private:
 
   void OnGzState(const gz::msgs::StringMsg & msg)
   {
-    this->last_gz_state_steady_ns_.store(
-      std::chrono::duration_cast<std::chrono::nanoseconds>(
-        std::chrono::steady_clock::now().time_since_epoch()).count());
+    const auto now_steady_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+      std::chrono::steady_clock::now().time_since_epoch()).count();
+    this->last_gz_state_steady_ns_.store(now_steady_ns);
     const auto & data = msg.data();
     if (this->sim_state_pub_) {
       std_msgs::msg::String sim_state;
@@ -272,35 +285,51 @@ private:
       this->sim_state_pub_->publish(sim_state);
     }
 
-    this->triggered_ = data.find("triggered=1") != std::string::npos;
-    this->latched_ = data.find("latched=1") != std::string::npos;
+    const bool triggered = data.find("triggered=1") != std::string::npos;
+    const bool latched = data.find("latched=1") != std::string::npos;
     const bool armed = data.find("armed=1") != std::string::npos;
+    std::string conductor_id;
     const auto conductor_pos = data.find("conductor=");
     if (conductor_pos != std::string::npos) {
       const auto end = data.find(';', conductor_pos);
-      this->latched_conductor_id_ = data.substr(
+      conductor_id = data.substr(
         conductor_pos + std::string("conductor=").size(),
         end == std::string::npos ? std::string::npos :
         end - conductor_pos - std::string("conductor=").size());
     }
 
-    if (this->latched_ && this->state_ == State::ArmedToClose) {
-      this->state_ = State::Latched;
+    bool state_changed = false;
+    bool should_log = false;
+    {
+      std::lock_guard<std::mutex> lock(this->gz_state_mutex_);
+      this->triggered_ = triggered;
+      this->latched_ = latched;
+      this->latched_conductor_id_ = conductor_id;
+      if (this->latched_ && this->state_ == State::ArmedToClose) {
+        this->state_ = State::Latched;
+      }
+      state_changed =
+        armed != this->last_logged_armed_ ||
+        triggered != this->last_logged_triggered_ ||
+        latched != this->last_logged_latched_;
+      constexpr int64_t log_interval_ns = 1000000000LL;
+      should_log = state_changed ||
+        (armed && !latched && now_steady_ns - this->last_gz_log_steady_ns_ >= log_interval_ns);
+      if (should_log) {
+        this->last_gz_log_steady_ns_ = now_steady_ns;
+        this->last_logged_armed_ = armed;
+        this->last_logged_triggered_ = triggered;
+        this->last_logged_latched_ = latched;
+      }
     }
 
-    const bool state_changed =
-      armed != this->last_logged_armed_ ||
-      this->triggered_ != this->last_logged_triggered_ ||
-      this->latched_ != this->last_logged_latched_;
-    if (state_changed || (armed && !this->latched_)) {
-      RCLCPP_INFO_THROTTLE(
+    if (should_log) {
+      RCLCPP_INFO(
         this->get_logger(),
-        *this->get_clock(),
-        state_changed ? 0 : 1000,
         "Sim gripper state: armed=%s triggered=%s latched=%s conductor=%s nearest=(%s,%s,%s) closest=(%s,%s,%s) closest_distance=%s latch_radius=%s seated_error=%s raw=[%s]",
         armed ? "true" : "false",
-        this->triggered_ ? "true" : "false",
-        this->latched_ ? "true" : "false",
+        triggered ? "true" : "false",
+        latched ? "true" : "false",
         this->ExtractField(data, "conductor").c_str(),
         this->ExtractField(data, "nearest_local_x").c_str(),
         this->ExtractField(data, "nearest_local_y").c_str(),
@@ -313,9 +342,6 @@ private:
         this->ExtractField(data, "seated_error").c_str(),
         data.c_str());
     }
-    this->last_logged_armed_ = armed;
-    this->last_logged_triggered_ = this->triggered_;
-    this->last_logged_latched_ = this->latched_;
   }
 
   std::string ExtractField(const std::string & data, const std::string & key) const
@@ -432,6 +458,12 @@ private:
 
   bool LatchConfirmed() const
   {
+    std::lock_guard<std::mutex> lock(this->gz_state_mutex_);
+    return this->LatchConfirmedLocked();
+  }
+
+  bool LatchConfirmedLocked() const
+  {
     if (!this->latched_) {
       return false;
     }
@@ -446,11 +478,12 @@ private:
 
   void UpdateStateAndPower()
   {
+    std::lock_guard<std::mutex> lock(this->gz_state_mutex_);
     const auto now = this->now();
     const auto dt = std::max(0.001, (now - this->last_update_time_).seconds());
     this->last_update_time_ = now;
 
-    const bool latch_confirmed = this->LatchConfirmed();
+    const bool latch_confirmed = this->LatchConfirmedLocked();
     if (!latch_confirmed && (this->state_ == State::Latched ||
         this->state_ == State::Charging || this->state_ == State::FullyCharged))
     {
@@ -503,6 +536,16 @@ private:
   {
     this->UpdateStateAndPower();
 
+    State state;
+    bool latched;
+    double charging_power_w;
+    {
+      std::lock_guard<std::mutex> lock(this->gz_state_mutex_);
+      state = this->state_;
+      latched = this->latched_;
+      charging_power_w = this->charging_power_w_;
+    }
+
     iii_drone_interfaces::msg::GripperStatus gripper_status;
     const bool latch_confirmed = this->LatchConfirmed();
     gripper_status.gripper_status =
@@ -516,14 +559,14 @@ private:
     this->battery_voltage_pub_->publish(battery_voltage);
 
     std_msgs::msg::Float32 charging_power;
-    charging_power.data = static_cast<float>(this->charging_power_w_);
+    charging_power.data = static_cast<float>(charging_power_w);
     this->charging_power_pub_->publish(charging_power);
 
     iii_drone_interfaces::msg::ChargerStatus charger_status;
-    if (this->state_ == State::FullyCharged) {
+    if (state == State::FullyCharged) {
       charger_status.charger_status =
         iii_drone_interfaces::msg::ChargerStatus::CHARGER_STATUS_FULLY_CHARGED;
-    } else if (this->state_ == State::Charging && this->charging_power_w_ > 0.1) {
+    } else if (state == State::Charging && charging_power_w > 0.1) {
       charger_status.charger_status =
         iii_drone_interfaces::msg::ChargerStatus::CHARGER_STATUS_CHARGING;
     } else {
@@ -540,9 +583,9 @@ private:
 
     px4_msgs::msg::SimBatteryCharge charge;
     charge.timestamp = this->now().nanoseconds() / 1000;
-    charge.charging_enabled = latch_confirmed && this->charging_power_w_ > 0.1;
+    charge.charging_enabled = latch_confirmed && charging_power_w > 0.1;
     charge.charging_power_w = charge.charging_enabled ?
-      static_cast<float>(this->charging_power_w_) : 0.0f;
+      static_cast<float>(charging_power_w) : 0.0f;
     this->px4_charge_pub_->publish(charge);
 
     ++this->status_publish_count_;
@@ -550,7 +593,7 @@ private:
       RCLCPP_INFO(
         this->get_logger(), "Published simulated gripper status sample %lu: latched=%s state=%u",
         static_cast<unsigned long>(this->status_publish_count_),
-        this->latched_ ? "true" : "false",
+        latched ? "true" : "false",
         static_cast<unsigned>(gripper_status.gripper_status));
     }
   }
@@ -561,7 +604,9 @@ private:
   bool last_logged_armed_{false};
   bool last_logged_triggered_{false};
   bool last_logged_latched_{false};
+  int64_t last_gz_log_steady_ns_{0};
   std::string latched_conductor_id_;
+  mutable std::mutex gz_state_mutex_;
   double status_publish_rate_hz_{50.0};
   double px4_battery_status_timeout_s_{1.0};
   double fallback_battery_voltage_v_{24.0};
