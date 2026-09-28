@@ -63,8 +63,8 @@ def test_simulation_launch_files_generate_descriptions(tmp_path, monkeypatch):
 
     assert isinstance(sim_assets_description, LaunchDescription)
     assert isinstance(tf_description, LaunchDescription)
-    assert len(sim_assets_description.entities) == 8
-    assert len(tf_description.entities) == 7
+    assert len(sim_assets_description.entities) == 13
+    assert len(tf_description.entities) == 8
 
 
 def test_sim_assets_launch_contains_expected_bridge_nodes(tmp_path, monkeypatch):
@@ -75,9 +75,12 @@ def test_sim_assets_launch_contains_expected_bridge_nodes(tmp_path, monkeypatch)
 
     nodes = [entity for entity in description.entities if isinstance(entity, Node)]
 
+    assert description.entities[0].name == "include_diagnostics"
+    assert description.entities[1].name == "use_camera_rate_limiter"
     assert [node._Node__node_name for node in nodes] == [
         "clock_gz_bridge",
         "camera_gz_bridge",
+        "camera_rate_limiter",
         "depth_cam_gz_bridge",
         "mmwave_gz_bridge",
         "mmwave_full_gz_bridge",
@@ -88,6 +91,7 @@ def test_sim_assets_launch_contains_expected_bridge_nodes(tmp_path, monkeypatch)
     assert [node._Node__package for node in nodes] == [
         "ros_gz_bridge",
         "ros_gz_bridge",
+        "iii_drone_simulation",
         "ros_gz_bridge",
         "ros_gz_bridge",
         "ros_gz_bridge",
@@ -95,20 +99,22 @@ def test_sim_assets_launch_contains_expected_bridge_nodes(tmp_path, monkeypatch)
         "ros_gz_bridge",
         "ros_gz_bridge",
     ]
+    assert nodes[2]._ExecuteLocal__respawn is True
+    assert nodes[2]._ExecuteLocal__respawn_delay == 1.0
     assert nodes[0]._Node__arguments == ["/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock"]
-    assert nodes[3]._Node__arguments == [
+    assert nodes[4]._Node__arguments == [
         "/sensor/mmwave/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked"
     ]
-    assert nodes[4]._Node__arguments == [
+    assert nodes[5]._Node__arguments == [
         "/sensor/mmwave/points_full@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked"
     ]
-    assert nodes[5]._Node__arguments == [
+    assert nodes[6]._Node__arguments == [
         "/simulation/ground_truth/drone/odometry@nav_msgs/msg/Odometry[gz.msgs.Odometry"
     ]
-    assert nodes[6]._Node__arguments == [
+    assert nodes[7]._Node__arguments == [
         "/simulation/ground_truth/mmwave/conductor_labels@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked"
     ]
-    assert nodes[7]._Node__arguments == [
+    assert nodes[8]._Node__arguments == [
         "/simulation/ground_truth/conductor_id_map@std_msgs/msg/String[gz.msgs.StringMsg"
     ]
 
@@ -219,6 +225,7 @@ def test_tf_launch_uses_frame_ids_from_configuration(tmp_path, monkeypatch):
 
     assert description.entities[0].name == "drone_frame_broadcaster_log_level"
     assert description.entities[1].name == "use_ground_truth_odometry"
+    assert description.entities[2].name == "publish_world_to_drone"
     assert nodes[0]._Node__arguments[-2:] == ["drone", "cable_gripper"]
     assert nodes[1]._Node__arguments[-2:] == ["drone", "mmwave"]
     assert nodes[2]._Node__arguments[-2:] == ["drone", "depth_camera"]
@@ -231,7 +238,9 @@ def test_tf_launch_uses_frame_ids_from_configuration(tmp_path, monkeypatch):
 def test_hil_launcher_selects_ground_truth_tf_source():
     launcher = (WORKSPACE_ROOT / "tools" / "simulation" / "launch_hil_workstation.sh").read_text()
 
-    assert "tf_sim.launch.py use_ground_truth_odometry:=true" in launcher
+    assert "tf_sim.launch.py use_ground_truth_odometry:=true publish_world_to_drone:=true" in launcher
+    assert "sim_assets.launch.py include_diagnostics:=false" in launcher
+    assert "use_camera_rate_limiter:=true" in launcher
 
 
 def test_tf_launch_static_transform_argument_counts_use_production_config(monkeypatch):
@@ -264,7 +273,7 @@ def test_tf_launch_static_transform_argument_counts_use_production_config(monkey
         "0.4",
         "1.57079632679",
         "0.0",
-        "1.57079632679",
+        "0.0",
     ]
     assert static_transform_nodes[1]._Node__arguments[:6] == [
         "0.025",
@@ -371,7 +380,7 @@ def test_asset_airframe_matches_px4_romfs_copy():
     assert px4_airframe.read_bytes() == asset_airframe.read_bytes()
 
 
-def test_simulated_gripper_aligns_with_drone_yaw_and_engages_support_smoothly():
+def test_simulated_gripper_matches_the_controller_cable_gripper_frame():
     model_path = (
         PACKAGE_ROOT
         / "Gazebo-simulation-assets"
@@ -386,7 +395,10 @@ def test_simulated_gripper_aligns_with_drone_yaw_and_engages_support_smoothly():
 
     assert plugin is not None
     gripper_pose = [float(value) for value in plugin.findtext("gripper_pose").split()]
-    assert gripper_pose[5] == 1.57079632679
+    # This is the published /tf/sim/drone_to_cable_gripper contract.  The
+    # Gazebo plugin must use the same origin and roll convention, otherwise
+    # the controller can center the cable in its frame without ever latching.
+    assert gripper_pose == [0.0, 0.0, 0.4, 1.57079632679, 0.0, 0.0]
     assert float(plugin.findtext("latch_radius")) <= 0.04
     assert float(plugin.findtext("support_ramp_duration_s")) > 0.0
 

@@ -14,6 +14,7 @@
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_lifecycle/lifecycle_node.hpp>
 #include <std_msgs/msg/float32.hpp>
+#include <std_msgs/msg/bool.hpp>
 #include <std_msgs/msg/string.hpp>
 
 #include <iii_drone_interfaces/msg/charger_operating_mode.hpp>
@@ -111,6 +112,8 @@ private:
       this->create_publisher<iii_drone_interfaces::msg::GripperStatus>("gripper_status", status_qos);
     this->battery_voltage_pub_ =
       this->create_publisher<std_msgs::msg::Float32>("battery_voltage", status_qos);
+    this->battery_source_fresh_pub_ =
+      this->create_publisher<std_msgs::msg::Bool>("px4_battery_source_fresh", status_qos);
     this->charging_power_pub_ =
       this->create_publisher<std_msgs::msg::Float32>("charging_power", status_qos);
     this->charger_status_pub_ =
@@ -161,6 +164,7 @@ private:
     RCLCPP_INFO(this->get_logger(), "Activating simulated charger gripper.");
     this->gripper_status_pub_->on_activate();
     this->battery_voltage_pub_->on_activate();
+    this->battery_source_fresh_pub_->on_activate();
     this->charging_power_pub_->on_activate();
     this->charger_status_pub_->on_activate();
     this->charger_operating_mode_pub_->on_activate();
@@ -194,6 +198,7 @@ private:
 
     this->gripper_status_pub_->on_deactivate();
     this->battery_voltage_pub_->on_deactivate();
+    this->battery_source_fresh_pub_->on_deactivate();
     this->charging_power_pub_->on_deactivate();
     this->charger_status_pub_->on_deactivate();
     this->charger_operating_mode_pub_->on_deactivate();
@@ -208,6 +213,7 @@ private:
     this->px4_battery_sub_.reset();
     this->gripper_status_pub_.reset();
     this->battery_voltage_pub_.reset();
+    this->battery_source_fresh_pub_.reset();
     this->charging_power_pub_.reset();
     this->charger_status_pub_.reset();
     this->charger_operating_mode_pub_.reset();
@@ -557,6 +563,10 @@ private:
     std_msgs::msg::Float32 battery_voltage;
     battery_voltage.data = static_cast<float>(this->BatteryVoltage());
     this->battery_voltage_pub_->publish(battery_voltage);
+    std_msgs::msg::Bool battery_source_fresh;
+    battery_source_fresh.data =
+      this->BatteryFresh() && this->last_battery_msg_.voltage_v > 0.0f;
+    this->battery_source_fresh_pub_->publish(battery_source_fresh);
 
     std_msgs::msg::Float32 charging_power;
     charging_power.data = static_cast<float>(charging_power_w);
@@ -641,6 +651,7 @@ private:
   rclcpp_lifecycle::LifecyclePublisher<iii_drone_interfaces::msg::GripperStatus>::SharedPtr
     gripper_status_pub_;
   rclcpp_lifecycle::LifecyclePublisher<std_msgs::msg::Float32>::SharedPtr battery_voltage_pub_;
+  rclcpp_lifecycle::LifecyclePublisher<std_msgs::msg::Bool>::SharedPtr battery_source_fresh_pub_;
   rclcpp_lifecycle::LifecyclePublisher<std_msgs::msg::Float32>::SharedPtr charging_power_pub_;
   rclcpp_lifecycle::LifecyclePublisher<iii_drone_interfaces::msg::ChargerStatus>::SharedPtr
     charger_status_pub_;

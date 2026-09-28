@@ -1,5 +1,5 @@
 from launch import LaunchDescription
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch.actions import DeclareLaunchArgument
 from launch.conditions import IfCondition, UnlessCondition
 from launch_ros.actions import Node
@@ -19,6 +19,7 @@ def _parameter_sources() -> list[object]:
 def generate_launch_description():
     drone_frame_broadcaster_log_level = LaunchConfiguration("drone_frame_broadcaster_log_level")
     use_ground_truth_odometry = LaunchConfiguration("use_ground_truth_odometry")
+    publish_world_to_drone = LaunchConfiguration("publish_world_to_drone")
 
     drone_frame_broadcaster_log_level_arg = DeclareLaunchArgument(
         "drone_frame_broadcaster_log_level",
@@ -29,6 +30,11 @@ def generate_launch_description():
         "use_ground_truth_odometry",
         default_value="false",
         description="Publish world-to-drone TF from Gazebo ground truth instead of PX4 uXRCE odometry",
+    )
+    publish_world_to_drone_arg = DeclareLaunchArgument(
+        "publish_world_to_drone",
+        default_value="true",
+        description="Publish a dynamic world-to-drone TF source; disable when another host owns it",
     )
     
     ros_params = _resolve_ros_params_file()
@@ -70,7 +76,9 @@ def generate_launch_description():
         executable="drone_frame_broadcaster",
         arguments=["--ros-args", "--log-level", drone_frame_broadcaster_log_level],
         parameters=_parameter_sources(),
-        condition=UnlessCondition(use_ground_truth_odometry),
+        condition=IfCondition(PythonExpression([
+            "'", publish_world_to_drone, "' == 'true' and '", use_ground_truth_odometry, "' != 'true'"
+        ])),
     )
 
     ground_truth_world_to_drone = Node(
@@ -83,12 +91,15 @@ def generate_launch_description():
                 "drone_frame_id": drone_frame_id,
             }
         ],
-        condition=IfCondition(use_ground_truth_odometry),
+        condition=IfCondition(PythonExpression([
+            "'", publish_world_to_drone, "' == 'true' and '", use_ground_truth_odometry, "' == 'true'"
+        ])),
     )
 
     return LaunchDescription([
         drone_frame_broadcaster_log_level_arg,
         use_ground_truth_odometry_arg,
+        publish_world_to_drone_arg,
         tf_drone_to_cable_gripper,
         tf_drone_to_iwr,
         tf_drone_to_depth_cam,

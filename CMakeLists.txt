@@ -128,6 +128,12 @@ install(PROGRAMS
   RENAME ground_truth_frame_broadcaster
 )
 
+install(PROGRAMS
+  iii_drone_simulation/rate_limited_image_relay.py
+  DESTINATION lib/${PROJECT_NAME}
+  RENAME rate_limited_image_relay
+)
+
 # Export information to downstream packages
 if(ROS_DISTRO IN_LIST ROS_DISTROS)
   ament_export_dependencies(ament_cmake rclcpp rosidl_default_runtime eigen3_cmake_module Eigen3 px4_msgs geometry_msgs sensor_msgs OpenCV)

@@ -1,4 +1,7 @@
 from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument
+from launch.conditions import IfCondition
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 from iii_drone_configuration.schema_utils import resolve_active_parameter_file, seed_runtime_configuration
@@ -12,6 +15,30 @@ def _parameter_sources() -> list[object]:
     return [_resolve_ros_params_file(), {"use_sim_time": True}]
 
 def generate_launch_description():
+    include_diagnostics = LaunchConfiguration("include_diagnostics")
+    use_camera_rate_limiter = LaunchConfiguration("use_camera_rate_limiter")
+    camera_output_topic = LaunchConfiguration("camera_output_topic")
+    camera_rate_hz = LaunchConfiguration("camera_rate_hz")
+    include_diagnostics_arg = DeclareLaunchArgument(
+        "include_diagnostics",
+        default_value="true",
+        description="Bridge high-bandwidth diagnostic streams in addition to mission sensor inputs",
+    )
+    use_camera_rate_limiter_arg = DeclareLaunchArgument(
+        "use_camera_rate_limiter",
+        default_value="false",
+        description="Bound camera traffic before it crosses a split-host HIL link",
+    )
+    camera_output_topic_arg = DeclareLaunchArgument(
+        "camera_output_topic",
+        default_value="/sensor/cable_camera/image_raw",
+        description="ROS output topic used by the Gazebo camera bridge",
+    )
+    camera_rate_hz_arg = DeclareLaunchArgument(
+        "camera_rate_hz",
+        default_value="2.5",
+        description="Maximum camera frames per second when the HIL relay is enabled",
+    )
     clock_gz_bridge = Node(
         package='ros_gz_bridge',
         executable='parameter_bridge',
@@ -26,6 +53,23 @@ def generate_launch_description():
         name='camera_gz_bridge',
         arguments=["/sensor/cable_camera/image_raw@sensor_msgs/msg/Image[gz.msgs.Image"],
         parameters=_parameter_sources(),
+        remappings=[("/sensor/cable_camera/image_raw", camera_output_topic)],
+    )
+
+    camera_rate_limiter = Node(
+        package="iii_drone_simulation",
+        executable="rate_limited_image_relay",
+        name="camera_rate_limiter",
+        respawn=True,
+        respawn_delay=1.0,
+        parameters=[
+            {
+                "input_topic": camera_output_topic,
+                "output_topic": "/sensor/cable_camera/image_raw",
+                "max_hz": camera_rate_hz,
+            }
+        ],
+        condition=IfCondition(use_camera_rate_limiter),
     )
     
     depth_cam_gz_bridge = Node(
@@ -34,6 +78,7 @@ def generate_launch_description():
         name='depth_cam_gz_bridge',
         arguments=["/depth_camera/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked"],
         parameters=_parameter_sources(),
+        condition=IfCondition(include_diagnostics),
     )
 
     mmwave_gz_bridge = Node(
@@ -50,6 +95,7 @@ def generate_launch_description():
         name='mmwave_full_gz_bridge',
         arguments=["/sensor/mmwave/points_full@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked"],
         parameters=_parameter_sources(),
+        condition=IfCondition(include_diagnostics),
     )
 
     ground_truth_odometry_gz_bridge = Node(
@@ -65,6 +111,7 @@ def generate_launch_description():
         name='mmwave_labels_gz_bridge',
         arguments=["/simulation/ground_truth/mmwave/conductor_labels@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked"],
         parameters=_parameter_sources(),
+        condition=IfCondition(include_diagnostics),
     )
 
     conductor_id_map_gz_bridge = Node(
@@ -72,11 +119,17 @@ def generate_launch_description():
         name='conductor_id_map_gz_bridge',
         arguments=["/simulation/ground_truth/conductor_id_map@std_msgs/msg/String[gz.msgs.StringMsg"],
         parameters=_parameter_sources(),
+        condition=IfCondition(include_diagnostics),
     )
 
     return LaunchDescription([
+        include_diagnostics_arg,
+        use_camera_rate_limiter_arg,
+        camera_output_topic_arg,
+        camera_rate_hz_arg,
         clock_gz_bridge,
         camera_gz_bridge,
+        camera_rate_limiter,
         depth_cam_gz_bridge,
         mmwave_gz_bridge,
         mmwave_full_gz_bridge,
