@@ -8,6 +8,22 @@ import yaml
 from iii_drone_configuration.schema_utils import resolve_active_parameter_file, seed_runtime_configuration
 
 
+
+def _static_transform_arguments(values, frame_id, child_frame_id):
+    """Named static_transform_publisher arguments for [x, y, z, yaw, pitch, roll].
+
+    The positional form is deprecated in Jazzy and logs a warning per start.
+    """
+    if len(values) != 6:
+        raise ValueError(
+            f"static transform {frame_id}->{child_frame_id} needs [x, y, z, yaw, pitch, roll], got {values!r}"
+        )
+    names = ("--x", "--y", "--z", "--yaw", "--pitch", "--roll")
+    arguments = []
+    for name, value in zip(names, values):
+        arguments += [name, str(value)]
+    return arguments + ["--frame-id", frame_id, "--child-frame-id", child_frame_id]
+
 def _resolve_ros_params_file() -> str:
     seed_runtime_configuration("sim")
     return str(resolve_active_parameter_file("sim"))
@@ -47,7 +63,7 @@ def generate_launch_description():
     mmwave_frame_id = params["/tf/mmwave_frame_id"]
     depth_cam_frame_id = params["/tf/sim/depth_cam_frame_id"]
 
-    args = [str(val) for val in params["/tf/sim/drone_to_cable_gripper"]] + [drone_frame_id, cable_gripper_frame_id]
+    args = _static_transform_arguments(params["/tf/sim/drone_to_cable_gripper"], drone_frame_id, cable_gripper_frame_id)
     tf_drone_to_cable_gripper = Node(
         package="tf2_ros",
         executable="static_transform_publisher",
@@ -55,7 +71,7 @@ def generate_launch_description():
         parameters=_parameter_sources(),
     )
 
-    args = [str(val) for val in params["/tf/sim/drone_to_mmwave"]] + [drone_frame_id, mmwave_frame_id]
+    args = _static_transform_arguments(params["/tf/sim/drone_to_mmwave"], drone_frame_id, mmwave_frame_id)
     tf_drone_to_iwr = Node(
         package="tf2_ros",
         executable="static_transform_publisher",
@@ -63,7 +79,7 @@ def generate_launch_description():
         parameters=_parameter_sources(),
     )
 
-    args = [str(val) for val in params["/tf/sim/drone_to_depth_cam"]] + [drone_frame_id, depth_cam_frame_id]
+    args = _static_transform_arguments(params["/tf/sim/drone_to_depth_cam"], drone_frame_id, depth_cam_frame_id)
     tf_drone_to_depth_cam = Node(
         package="tf2_ros",
         executable="static_transform_publisher",

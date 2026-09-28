@@ -226,19 +226,22 @@ def test_tf_launch_uses_frame_ids_from_configuration(tmp_path, monkeypatch):
     assert description.entities[0].name == "drone_frame_broadcaster_log_level"
     assert description.entities[1].name == "use_ground_truth_odometry"
     assert description.entities[2].name == "publish_world_to_drone"
-    assert nodes[0]._Node__arguments[-2:] == ["drone", "cable_gripper"]
-    assert nodes[1]._Node__arguments[-2:] == ["drone", "mmwave"]
-    assert nodes[2]._Node__arguments[-2:] == ["drone", "depth_camera"]
+    assert nodes[0]._Node__arguments[-4:] == ["--frame-id", "drone", "--child-frame-id", "cable_gripper"]
+    assert nodes[1]._Node__arguments[-4:] == ["--frame-id", "drone", "--child-frame-id", "mmwave"]
+    assert nodes[2]._Node__arguments[-4:] == ["--frame-id", "drone", "--child-frame-id", "depth_camera"]
     assert nodes[3]._Node__package == "iii_drone_core"
     assert nodes[3]._Node__node_executable == "drone_frame_broadcaster"
     assert nodes[4]._Node__package == "iii_drone_simulation"
     assert nodes[4]._Node__node_executable == "ground_truth_frame_broadcaster"
 
 
-def test_hil_launcher_selects_ground_truth_tf_source():
+def test_hil_launcher_leaves_world_to_drone_to_the_pi():
     launcher = (WORKSPACE_ROOT / "tools" / "simulation" / "launch_hil_workstation.sh").read_text()
 
-    assert "tf_sim.launch.py use_ground_truth_odometry:=true publish_world_to_drone:=true" in launcher
+    # The Pi publishes the sole dynamic world -> drone transform from the same
+    # PX4 odometry its controller uses (docs/simulation-and-px4-integration.md);
+    # the workstation adapters must not publish a competing one.
+    assert "tf_sim.launch.py use_ground_truth_odometry:=true publish_world_to_drone:=false" in launcher
     assert "sim_assets.launch.py include_diagnostics:=false" in launcher
     assert "use_camera_rate_limiter:=true" in launcher
 
@@ -265,9 +268,11 @@ def test_tf_launch_static_transform_argument_counts_use_production_config(monkey
     ]
 
     assert len(static_transform_nodes) == 3
+    # Named (non-deprecated) arguments: six pose values plus both frame ids.
     for node in static_transform_nodes:
-        assert len(node._Node__arguments) in (8, 9)
-    assert static_transform_nodes[0]._Node__arguments[:6] == [
+        assert len(node._Node__arguments) == 16
+        assert node._Node__arguments[0::2][:6] == ["--x", "--y", "--z", "--yaw", "--pitch", "--roll"]
+    assert static_transform_nodes[0]._Node__arguments[1:12:2] == [
         "0.0",
         "0.0",
         "0.4",
@@ -275,7 +280,7 @@ def test_tf_launch_static_transform_argument_counts_use_production_config(monkey
         "0.0",
         "0.0",
     ]
-    assert static_transform_nodes[1]._Node__arguments[:6] == [
+    assert static_transform_nodes[1]._Node__arguments[1:12:2] == [
         "0.025",
         "-0.24",
         "0.295",
@@ -283,6 +288,12 @@ def test_tf_launch_static_transform_argument_counts_use_production_config(monkey
         "-1.57079632679",
         "0.0",
     ]
+
+
+def test_static_transform_arguments_reject_non_euler_values():
+    tf_module = _load_module("launch/tf_sim.launch.py")
+    with pytest.raises(ValueError):
+        tf_module._static_transform_arguments([0, 0, 0, 0, 0, 0, 1], "drone", "mmwave")
 
 
 def test_conductor_asset_is_present_and_contains_four_conductors():
