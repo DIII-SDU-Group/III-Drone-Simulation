@@ -32,6 +32,8 @@
   <depend>px4_msgs</depend>
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
+  <exec_depend>image_transport</exec_depend>
+  <exec_depend>compressed_image_transport</exec_depend>
 
   <export>
     <build_type>ament_cmake</build_type>

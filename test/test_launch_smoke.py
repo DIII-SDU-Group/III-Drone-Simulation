@@ -63,7 +63,7 @@ def test_simulation_launch_files_generate_descriptions(tmp_path, monkeypatch):
 
     assert isinstance(sim_assets_description, LaunchDescription)
     assert isinstance(tf_description, LaunchDescription)
-    assert len(sim_assets_description.entities) == 13
+    assert len(sim_assets_description.entities) == 15
     assert len(tf_description.entities) == 8
 
 
@@ -81,6 +81,8 @@ def test_sim_assets_launch_contains_expected_bridge_nodes(tmp_path, monkeypatch)
         "clock_gz_bridge",
         "camera_gz_bridge",
         "camera_rate_limiter",
+        "camera_compressor",
+        "camera_compressor",
         "depth_cam_gz_bridge",
         "mmwave_gz_bridge",
         "mmwave_full_gz_bridge",
@@ -92,6 +94,8 @@ def test_sim_assets_launch_contains_expected_bridge_nodes(tmp_path, monkeypatch)
         "ros_gz_bridge",
         "ros_gz_bridge",
         "iii_drone_simulation",
+        "image_transport",
+        "image_transport",
         "ros_gz_bridge",
         "ros_gz_bridge",
         "ros_gz_bridge",
@@ -102,21 +106,35 @@ def test_sim_assets_launch_contains_expected_bridge_nodes(tmp_path, monkeypatch)
     assert nodes[2]._ExecuteLocal__respawn is True
     assert nodes[2]._ExecuteLocal__respawn_delay == 1.0
     assert nodes[0]._Node__arguments == ["/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock"]
-    assert nodes[4]._Node__arguments == [
+    assert nodes[6]._Node__arguments == [
         "/sensor/mmwave/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked"
     ]
-    assert nodes[5]._Node__arguments == [
+    assert nodes[7]._Node__arguments == [
         "/sensor/mmwave/points_full@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked"
     ]
-    assert nodes[6]._Node__arguments == [
+    assert nodes[8]._Node__arguments == [
         "/simulation/ground_truth/drone/odometry@nav_msgs/msg/Odometry[gz.msgs.Odometry"
     ]
-    assert nodes[7]._Node__arguments == [
+    assert nodes[9]._Node__arguments == [
         "/simulation/ground_truth/mmwave/conductor_labels@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked"
     ]
-    assert nodes[8]._Node__arguments == [
+    assert nodes[10]._Node__arguments == [
         "/simulation/ground_truth/conductor_id_map@std_msgs/msg/String[gz.msgs.StringMsg"
     ]
+    # Only lossless PNG frames cross the HIL link; raw frames stay local.
+    launch_source = (Path(__file__).resolve().parents[1] / "launch" / "sim_assets.launch.py").read_text()
+    assert '"output_topic": HIL_RATE_LIMITED_CAMERA_TOPIC' in launch_source
+    hil_compressor, sim_compressor = nodes[3], nodes[4]
+
+    def remaps(node):
+        text = lambda subs: "".join(sub.text for sub in subs)
+        return {text(src): text(dst) for src, dst in node._Node__remappings}
+
+    for compressor in (hil_compressor, sim_compressor):
+        assert remaps(compressor)["out/compressed"] == "/sensor/cable_camera/image_raw/compressed"
+    assert remaps(hil_compressor)["in"] == sim_assets_module.HIL_RATE_LIMITED_CAMERA_TOPIC
+    assert remaps(sim_compressor)["in"] == "/sensor/cable_camera/image_raw"
+    assert sim_assets_module.HIL_RATE_LIMITED_CAMERA_TOPIC != "/sensor/cable_camera/image_raw"
 
 
 def test_drone_model_publishes_authoritative_3d_ground_truth_odometry():

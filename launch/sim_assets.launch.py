@@ -1,10 +1,13 @@
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
-from launch.conditions import IfCondition
+from launch.conditions import IfCondition, UnlessCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 from iii_drone_configuration.schema_utils import resolve_active_parameter_file, seed_runtime_configuration
+
+
+HIL_RATE_LIMITED_CAMERA_TOPIC = "/simulation/local/cable_camera/image_rate_limited"
 
 def _resolve_ros_params_file() -> str:
     seed_runtime_configuration("sim")
@@ -65,13 +68,48 @@ def generate_launch_description():
         parameters=[
             {
                 "input_topic": camera_output_topic,
-                "output_topic": "/sensor/cable_camera/image_raw",
+                # Stays on the workstation: only the compressed stream below
+                # crosses the split-host link.
+                "output_topic": HIL_RATE_LIMITED_CAMERA_TOPIC,
                 "max_hz": camera_rate_hz,
             }
         ],
         condition=IfCondition(use_camera_rate_limiter),
     )
     
+    # Consumers read /sensor/cable_camera/image_raw/compressed: lossless PNG,
+    # ~7 KB per simulated frame instead of ~920 KB raw. Raw frames sent
+    # best-effort across the HIL link lost ~25% of frames (a frame is lost with
+    # any of its ~15 UDP fragments), which starved cable detection. SIM
+    # publishes the same stream so SIM and HIL run identical consumers.
+    def camera_compressor(input_topic, condition):
+        return Node(
+            package="image_transport",
+            executable="republish",
+            name="camera_compressor",
+            respawn=True,
+            respawn_delay=1.0,
+            parameters=[
+                {
+                    "in_transport": "raw",
+                    "out_transport": "compressed",
+                    "out.compressed.format": "png",
+                    "out.compressed.png_level": 3,
+                    "qos_overrides." + input_topic + ".subscription.reliability": "best_effort",
+                }
+            ],
+            remappings=[
+                ("in", input_topic),
+                ("out/compressed", "/sensor/cable_camera/image_raw/compressed"),
+            ],
+            condition=condition,
+        )
+
+    hil_camera_compressor = camera_compressor(
+        HIL_RATE_LIMITED_CAMERA_TOPIC, IfCondition(use_camera_rate_limiter))
+    sim_camera_compressor = camera_compressor(
+        "/sensor/cable_camera/image_raw", UnlessCondition(use_camera_rate_limiter))
+
     depth_cam_gz_bridge = Node(
         package='ros_gz_bridge',
         executable='parameter_bridge',
@@ -130,6 +168,8 @@ def generate_launch_description():
         clock_gz_bridge,
         camera_gz_bridge,
         camera_rate_limiter,
+        hil_camera_compressor,
+        sim_camera_compressor,
         depth_cam_gz_bridge,
         mmwave_gz_bridge,
         mmwave_full_gz_bridge,
