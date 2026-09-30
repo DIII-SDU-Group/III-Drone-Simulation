@@ -105,6 +105,7 @@ add_library(iii_drone_sim_charger_gripper_plugin SHARED
   src/sim_charger_gripper_plugin.cpp
 )
 target_compile_features(iii_drone_sim_charger_gripper_plugin PRIVATE cxx_std_17)
+target_include_directories(iii_drone_sim_charger_gripper_plugin PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(iii_drone_sim_charger_gripper_plugin
   PRIVATE
     ${III_DRONE_SIMULATION_GZ_SIM_TARGET}
@@ -148,6 +149,15 @@ install(DIRECTORY
 )
 
 if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(iii_drone_simulation_charger_gripper_jaws_test
+    test/charger_gripper_jaws_test.cpp
+  )
+  if(TARGET iii_drone_simulation_charger_gripper_jaws_test)
+    target_compile_features(iii_drone_simulation_charger_gripper_jaws_test PRIVATE cxx_std_17)
+    target_include_directories(iii_drone_simulation_charger_gripper_jaws_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_link_libraries(iii_drone_simulation_charger_gripper_jaws_test gz-math7::core)
+  endif()
   find_package(ament_cmake_pytest REQUIRED)
 
   ament_add_pytest_test(iii_drone_simulation_launch_smoke_test

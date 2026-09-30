@@ -3,6 +3,7 @@ from pathlib import Path
 import xml.etree.ElementTree as ET
 
 import pytest
+import yaml
 from launch import LaunchDescription
 from launch_ros.actions import Node
 
@@ -424,10 +425,15 @@ def test_simulated_gripper_matches_the_controller_cable_gripper_frame():
 
     assert plugin is not None
     gripper_pose = [float(value) for value in plugin.findtext("gripper_pose").split()]
-    # This is the published /tf/sim/drone_to_cable_gripper contract.  The
-    # Gazebo plugin must use the same origin and roll convention, otherwise
-    # the controller can center the cable in its frame without ever latching.
-    assert gripper_pose == [0.0, 0.0, 0.4, 1.57079632679, 0.0, 0.0]
+    # The published /tf/sim/drone_to_cable_gripper is [x, y, z, yaw, pitch,
+    # roll]; SDF poses are [x, y, z, roll, pitch, yaw]. The plugin must use
+    # the same frame (x along the cable), otherwise the controller can center
+    # the cable in its frame without ever latching.
+    parameters = yaml.safe_load((
+        WORKSPACE_ROOT / "src" / "III-Drone-Configuration" / "config" / "parameter_sets"
+        / "sim" / "tracked" / "default.yaml").read_text())
+    x, y, z, yaw, pitch, roll = parameters["/**"]["ros__parameters"]["/tf/sim/drone_to_cable_gripper"]
+    assert gripper_pose == [x, y, z, roll, pitch, yaw]
     assert float(plugin.findtext("latch_radius")) <= 0.04
     assert float(plugin.findtext("support_ramp_duration_s")) > 0.0
 
