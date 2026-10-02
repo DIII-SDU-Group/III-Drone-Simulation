@@ -14,8 +14,8 @@ This package provides:
 
 ### Launch Files
 
-- `launch/sim_assets.launch.py`: starts the simulated Gazebo asset bridge nodes, including `/clock`
-- `launch/tf_sim.launch.py`: starts static transform publishers and the drone frame broadcaster for simulation
+- `launch/sim_assets.launch.py`: starts the simulated Gazebo asset bridge nodes, including `/clock`; with `/tf/sim/sensor_layout` `d4s_dc_drone_powerline_eval` it also bridges `/sensor/mmwave_forward/*`
+- `launch/tf_sim.launch.py`: starts static transform publishers and the drone frame broadcaster for simulation; `/tf/sim/sensor_layout` selects the cable camera mount and, for `d4s_dc_drone_powerline_eval`, adds `drone -> mmwave_forward`
 
 These launch files are the main integration points consumed by the larger III launch stack when simulation mode is enabled.
 
@@ -42,8 +42,15 @@ These launch files are the main integration points consumed by the larger III la
     simulator-v2 model; `III_DRONE_SIMULATION_OPTIMIZE_RADAR_KERNELS` (default
     `ON`) compiles the plugin with `-O2` in Debug builds.
 
-  The `d4s_dc_drone_powerline_eval` model variant enables the pylon and finite
-  FOV settings; see `docs/perception-dataset-ground-truth.md` in the workspace.
+  `aop_config` and the profile's `scatterers_path` accept `model://` URIs;
+  a relative `scatterers_path` resolves against the profile's directory.
+
+  The `d4s_dc_drone_powerline_eval` model variant (Radar-U on `/sensor/mmwave`,
+  Radar-F on `/sensor/mmwave_forward`, cable camera 20 deg from upward) runs
+  both radars on `AOP_FAST_POINT`; select it with `--sim-model
+  gz_d4s_dc_drone_powerline_eval` and the configuration constant
+  `/tf/sim/sensor_layout`. See `docs/perception-dataset-ground-truth.md` in the
+  workspace.
 
 ### Support Assets
 

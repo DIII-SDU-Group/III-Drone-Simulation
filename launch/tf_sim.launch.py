@@ -24,6 +24,10 @@ def _static_transform_arguments(values, frame_id, child_frame_id):
         arguments += [name, str(value)]
     return arguments + ["--frame-id", frame_id, "--child-frame-id", child_frame_id]
 
+POWERLINE_EVAL_LAYOUT = "d4s_dc_drone_powerline_eval"
+SENSOR_LAYOUTS = ("d4s_dc_drone", POWERLINE_EVAL_LAYOUT)
+
+
 def _resolve_ros_params_file() -> str:
     seed_runtime_configuration("sim")
     return str(resolve_active_parameter_file("sim"))
@@ -62,6 +66,11 @@ def generate_launch_description():
     cable_gripper_frame_id = params["/tf/cable_gripper_frame_id"]
     mmwave_frame_id = params["/tf/mmwave_frame_id"]
     depth_cam_frame_id = params["/tf/sim/depth_cam_frame_id"]
+    cable_camera_frame_id = params["/tf/cable_camera_frame_id"]
+    sensor_layout = params["/tf/sim/sensor_layout"]
+    if sensor_layout not in SENSOR_LAYOUTS:
+        raise ValueError(f"unknown /tf/sim/sensor_layout {sensor_layout!r}; expected one of {SENSOR_LAYOUTS}")
+    powerline_eval = sensor_layout == POWERLINE_EVAL_LAYOUT
 
     args = _static_transform_arguments(params["/tf/sim/drone_to_cable_gripper"], drone_frame_id, cable_gripper_frame_id)
     tf_drone_to_cable_gripper = Node(
@@ -86,6 +95,32 @@ def generate_launch_description():
         arguments=args,
         parameters=_parameter_sources(),
     )
+
+    camera_mount = params[
+        "/tf/sim/powerline_eval/drone_to_cable_camera" if powerline_eval else "/tf/sim/drone_to_cable_camera"
+    ]
+    args = _static_transform_arguments(camera_mount, drone_frame_id, cable_camera_frame_id)
+    tf_drone_to_cable_camera = Node(
+        package="tf2_ros",
+        executable="static_transform_publisher",
+        arguments=args,
+        parameters=_parameter_sources(),
+    )
+
+    # The powerline SLAM evaluation layout adds the forward radar (Radar-F).
+    layout_transforms = []
+    if powerline_eval:
+        args = _static_transform_arguments(
+            params["/tf/sim/powerline_eval/drone_to_mmwave_forward"],
+            drone_frame_id,
+            params["/tf/mmwave_forward_frame_id"],
+        )
+        layout_transforms.append(Node(
+            package="tf2_ros",
+            executable="static_transform_publisher",
+            arguments=args,
+            parameters=_parameter_sources(),
+        ))
 
     world_to_drone = Node(
         package="iii_drone_core",
@@ -119,6 +154,8 @@ def generate_launch_description():
         tf_drone_to_cable_gripper,
         tf_drone_to_iwr,
         tf_drone_to_depth_cam,
+        tf_drone_to_cable_camera,
+        *layout_transforms,
         world_to_drone,
         ground_truth_world_to_drone,
     ])

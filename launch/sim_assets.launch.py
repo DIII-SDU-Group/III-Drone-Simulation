@@ -3,11 +3,13 @@ from launch.actions import DeclareLaunchArgument
 from launch.conditions import IfCondition, UnlessCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+import yaml
 
 from iii_drone_configuration.schema_utils import resolve_active_parameter_file, seed_runtime_configuration
 
 
 HIL_RATE_LIMITED_CAMERA_TOPIC = "/simulation/local/cable_camera/image_rate_limited"
+POWERLINE_EVAL_LAYOUT = "d4s_dc_drone_powerline_eval"
 
 def _resolve_ros_params_file() -> str:
     seed_runtime_configuration("sim")
@@ -16,6 +18,12 @@ def _resolve_ros_params_file() -> str:
 
 def _parameter_sources() -> list[object]:
     return [_resolve_ros_params_file(), {"use_sim_time": True}]
+
+
+def _sensor_layout() -> str:
+    with open(_resolve_ros_params_file(), "r") as file:
+        params = (yaml.safe_load(file) or {})["/**"]["ros__parameters"]
+    return params["/tf/sim/sensor_layout"]
 
 def generate_launch_description():
     include_diagnostics = LaunchConfiguration("include_diagnostics")
@@ -160,6 +168,37 @@ def generate_launch_description():
         condition=IfCondition(include_diagnostics),
     )
 
+    # The powerline SLAM evaluation layout adds the forward radar (Radar-F).
+    # The sensor plugin publishes its camera_info and evaluator truth on ROS
+    # directly, so no further bridges are needed.
+    layout_bridges = []
+    if _sensor_layout() == POWERLINE_EVAL_LAYOUT:
+        layout_bridges = [
+            Node(
+                package='ros_gz_bridge',
+                executable='parameter_bridge',
+                name='mmwave_forward_gz_bridge',
+                arguments=["/sensor/mmwave_forward/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked"],
+                parameters=_parameter_sources(),
+            ),
+            Node(
+                package='ros_gz_bridge',
+                executable='parameter_bridge',
+                name='mmwave_forward_full_gz_bridge',
+                arguments=["/sensor/mmwave_forward/points_full@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked"],
+                parameters=_parameter_sources(),
+                condition=IfCondition(include_diagnostics),
+            ),
+            Node(
+                package='ros_gz_bridge',
+                executable='parameter_bridge',
+                name='mmwave_forward_labels_gz_bridge',
+                arguments=["/simulation/ground_truth/mmwave_forward/conductor_labels@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked"],
+                parameters=_parameter_sources(),
+                condition=IfCondition(include_diagnostics),
+            ),
+        ]
+
     return LaunchDescription([
         include_diagnostics_arg,
         use_camera_rate_limiter_arg,
@@ -176,4 +215,5 @@ def generate_launch_description():
         ground_truth_odometry_gz_bridge,
         mmwave_labels_gz_bridge,
         conductor_id_map_gz_bridge,
+        *layout_bridges,
     ])

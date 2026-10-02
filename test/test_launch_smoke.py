@@ -1,5 +1,8 @@
 import importlib.util
+import math
 from pathlib import Path
+import subprocess
+import sys
 import xml.etree.ElementTree as ET
 
 import pytest
@@ -23,7 +26,7 @@ def _load_module(relative_path: str):
     return module
 
 
-def _write_config_tree(base_dir: Path):
+def _write_config_tree(base_dir: Path, sensor_layout: str = "d4s_dc_drone"):
     config_root = base_dir / "iii_drone"
     profiles_dir = config_root / "profiles"
     parameter_set_dir = config_root / "parameter_sets" / "sim" / "tracked"
@@ -44,11 +47,17 @@ def _write_config_tree(base_dir: Path):
         "    /tf/sim/drone_to_cable_gripper: [0, 0, 0, 0, 0, 0]\n"
         "    /tf/sim/drone_to_mmwave: [0, 0, 0, 0, 0, 0]\n"
         "    /tf/sim/drone_to_depth_cam: [0, 0, 0, 0, 0, 0]\n"
+        "    /tf/cable_camera_frame_id: cable_camera\n"
+        "    /tf/mmwave_forward_frame_id: mmwave_forward\n"
+        f"    /tf/sim/sensor_layout: {sensor_layout}\n"
+        "    /tf/sim/drone_to_cable_camera: [0, 0, 1, 0, 0, 0]\n"
+        "    /tf/sim/powerline_eval/drone_to_cable_camera: [0, 0, 2, 0, 0, 0]\n"
+        "    /tf/sim/powerline_eval/drone_to_mmwave_forward: [0, 0, 3, 0, 0, 0]\n"
     )
 
 
-def _isolate_runtime_state(base_dir: Path, monkeypatch):
-    _write_config_tree(base_dir)
+def _isolate_runtime_state(base_dir: Path, monkeypatch, sensor_layout: str = "d4s_dc_drone"):
+    _write_config_tree(base_dir, sensor_layout)
     monkeypatch.setenv("CONFIG_BASE_DIR", str(base_dir))
     monkeypatch.setenv("III_OPERATIONS_ROOT", str(base_dir / "operations"))
 
@@ -65,7 +74,7 @@ def test_simulation_launch_files_generate_descriptions(tmp_path, monkeypatch):
     assert isinstance(sim_assets_description, LaunchDescription)
     assert isinstance(tf_description, LaunchDescription)
     assert len(sim_assets_description.entities) == 15
-    assert len(tf_description.entities) == 8
+    assert len(tf_description.entities) == 9
 
 
 def test_sim_assets_launch_contains_expected_bridge_nodes(tmp_path, monkeypatch):
@@ -248,10 +257,55 @@ def test_tf_launch_uses_frame_ids_from_configuration(tmp_path, monkeypatch):
     assert nodes[0]._Node__arguments[-4:] == ["--frame-id", "drone", "--child-frame-id", "cable_gripper"]
     assert nodes[1]._Node__arguments[-4:] == ["--frame-id", "drone", "--child-frame-id", "mmwave"]
     assert nodes[2]._Node__arguments[-4:] == ["--frame-id", "drone", "--child-frame-id", "depth_camera"]
-    assert nodes[3]._Node__package == "iii_drone_core"
-    assert nodes[3]._Node__node_executable == "drone_frame_broadcaster"
-    assert nodes[4]._Node__package == "iii_drone_simulation"
-    assert nodes[4]._Node__node_executable == "ground_truth_frame_broadcaster"
+    assert nodes[3]._Node__arguments[-4:] == ["--frame-id", "drone", "--child-frame-id", "cable_camera"]
+    assert nodes[3]._Node__arguments[1:12:2] == ["0", "0", "1", "0", "0", "0"]
+    assert nodes[4]._Node__package == "iii_drone_core"
+    assert nodes[4]._Node__node_executable == "drone_frame_broadcaster"
+    assert nodes[5]._Node__package == "iii_drone_simulation"
+    assert nodes[5]._Node__node_executable == "ground_truth_frame_broadcaster"
+    child_frames = [node._Node__arguments[-1] for node in nodes[:4]]
+    assert "mmwave_forward" not in child_frames
+
+
+def test_powerline_eval_layout_publishes_its_camera_mount_and_forward_radar_frame(tmp_path, monkeypatch):
+    _isolate_runtime_state(tmp_path, monkeypatch, "d4s_dc_drone_powerline_eval")
+
+    tf_module = _load_module("launch/tf_sim.launch.py")
+    description = tf_module.generate_launch_description()
+    static_nodes = [
+        entity for entity in description.entities
+        if isinstance(entity, Node) and entity._Node__node_executable == "static_transform_publisher"
+    ]
+
+    by_child = {node._Node__arguments[-1]: node._Node__arguments for node in static_nodes}
+    assert set(by_child) == {"cable_gripper", "mmwave", "depth_camera", "cable_camera", "mmwave_forward"}
+    assert by_child["cable_camera"][1:12:2] == ["0", "0", "2", "0", "0", "0"]
+    assert by_child["mmwave_forward"][1:12:2] == ["0", "0", "3", "0", "0", "0"]
+    assert by_child["mmwave_forward"][-4:] == ["--frame-id", "drone", "--child-frame-id", "mmwave_forward"]
+
+
+def test_powerline_eval_layout_bridges_the_forward_radar(tmp_path, monkeypatch):
+    _isolate_runtime_state(tmp_path, monkeypatch, "d4s_dc_drone_powerline_eval")
+
+    sim_assets_module = _load_module("launch/sim_assets.launch.py")
+    description = sim_assets_module.generate_launch_description()
+    nodes = [entity for entity in description.entities if isinstance(entity, Node)]
+    bridges = {node._Node__node_name: node for node in nodes}
+
+    assert len(description.entities) == 18
+    assert bridges["mmwave_forward_gz_bridge"]._Node__arguments == [
+        "/sensor/mmwave_forward/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked"
+    ]
+    assert bridges["mmwave_forward_full_gz_bridge"]._Node__arguments == [
+        "/sensor/mmwave_forward/points_full@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked"
+    ]
+    assert bridges["mmwave_forward_labels_gz_bridge"]._Node__arguments == [
+        "/simulation/ground_truth/mmwave_forward/conductor_labels@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked"
+    ]
+    # Like the upward radar, the full cloud and labels are diagnostics streams.
+    assert bridges["mmwave_forward_gz_bridge"].condition is None
+    assert bridges["mmwave_forward_full_gz_bridge"].condition is not None
+    assert bridges["mmwave_forward_labels_gz_bridge"].condition is not None
 
 
 def test_hil_launcher_leaves_world_to_drone_to_the_pi():
@@ -286,7 +340,7 @@ def test_tf_launch_static_transform_argument_counts_use_production_config(monkey
         and entity._Node__node_executable == "static_transform_publisher"
     ]
 
-    assert len(static_transform_nodes) == 3
+    assert len(static_transform_nodes) == 4
     # Named (non-deprecated) arguments: six pose values plus both frame ids.
     for node in static_transform_nodes:
         assert len(node._Node__arguments) == 16
@@ -307,6 +361,110 @@ def test_tf_launch_static_transform_argument_counts_use_production_config(monkey
         "-1.57079632679",
         "0.0",
     ]
+    assert static_transform_nodes[3]._Node__arguments[1:12:2] == [
+        "0.0",
+        "-0.215",
+        "0.3",
+        "0.0",
+        "-1.571",
+        "0.0",
+    ]
+    assert static_transform_nodes[3]._Node__arguments[-1] == "cable_camera"
+
+
+def _rotation_rpy(roll, pitch, yaw):
+    """Rz(yaw) Ry(pitch) Rx(roll): SDF poses and static_transform_publisher alike."""
+    cr, sr = math.cos(roll), math.sin(roll)
+    cp, sp = math.cos(pitch), math.sin(pitch)
+    cy, sy = math.cos(yaw), math.sin(yaw)
+    return [
+        [cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr],
+        [sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr],
+        [-sp, cp * sr, cp * cr],
+    ]
+
+
+def _assert_mount_matches_sdf(sdf_pose: str, mount: list):
+    """A [x, y, z, yaw, pitch, roll] TF mount equals an SDF x y z roll pitch yaw pose."""
+    x, y, z, roll, pitch, yaw = (float(value) for value in sdf_pose.split())
+    assert mount[:3] == pytest.approx([x, y, z], abs=1e-9)
+    sdf_rotation = _rotation_rpy(roll, pitch, yaw)
+    tf_rotation = _rotation_rpy(mount[5], mount[4], mount[3])
+    for sdf_row, tf_row in zip(sdf_rotation, tf_rotation):
+        # The configured 3.1415 approximates pi in both sources.
+        assert tf_row == pytest.approx(sdf_row, abs=1e-3)
+
+
+def _tracked_sim_parameters() -> dict:
+    path = (
+        PACKAGE_ROOT.parent / "III-Drone-Configuration" / "config" / "parameter_sets"
+        / "sim" / "tracked" / "default.yaml"
+    )
+    return yaml.safe_load(path.read_text())["/**"]["ros__parameters"]
+
+
+def _model_root(model: str):
+    return ET.parse(PACKAGE_ROOT / "Gazebo-simulation-assets" / "models" / model / "model.sdf").getroot()
+
+
+def _radar_plugins(root):
+    return root.findall(".//plugin[@name='iii_drone::simulation::MmwaveConductorSensorPlugin']")
+
+
+def test_configured_sim_mounts_match_the_drone_model_sensor_poses():
+    params = _tracked_sim_parameters()
+    production = _model_root("d4s_dc_drone")
+    camera = production.find(".//sensor[@name='cable_camera']")
+    _assert_mount_matches_sdf(camera.findtext("pose"), params["/tf/sim/drone_to_cable_camera"])
+    (radar,) = _radar_plugins(production)
+    _assert_mount_matches_sdf(radar.findtext("sensor_pose"), params["/tf/sim/drone_to_mmwave"])
+
+    variant = _model_root("d4s_dc_drone_powerline_eval")
+    camera = variant.find(".//sensor[@name='cable_camera']")
+    _assert_mount_matches_sdf(
+        camera.findtext("pose"), params["/tf/sim/powerline_eval/drone_to_cable_camera"])
+    radars = {plugin.findtext("radar_instance"): plugin for plugin in _radar_plugins(variant)}
+    _assert_mount_matches_sdf(radars["mmwave"].findtext("sensor_pose"), params["/tf/sim/drone_to_mmwave"])
+    _assert_mount_matches_sdf(
+        radars["mmwave_forward"].findtext("sensor_pose"),
+        params["/tf/sim/powerline_eval/drone_to_mmwave_forward"],
+    )
+    assert params["/tf/sim/sensor_layout"] == "d4s_dc_drone"
+
+
+def test_powerline_eval_variant_has_two_simulator_v2_radars_and_the_tilted_camera():
+    variant = _model_root("d4s_dc_drone_powerline_eval")
+    radars = {plugin.findtext("radar_instance"): plugin for plugin in _radar_plugins(variant)}
+    assert set(radars) == {"mmwave", "mmwave_forward"}
+    for instance, profile in (("mmwave", "RADAR_U.yaml"), ("mmwave_forward", "RADAR_F.yaml")):
+        plugin = radars[instance]
+        assert plugin.findtext("radar_model") == "AOP_FAST_POINT"
+        assert plugin.findtext("aop_config") == f"model://d4s_dc_drone_powerline_eval/radar/{profile}"
+        assert plugin.findtext("topic") == f"/sensor/{instance}/points"
+        assert plugin.findtext("full_topic") == f"/sensor/{instance}/points_full"
+        assert plugin.findtext("frame_id") == instance
+        assert plugin.findtext("camera_pose") == variant.find(".//sensor[@name='cable_camera']").findtext("pose")
+    # Only Radar-U publishes the camera, drone-state and geometry truth.
+    assert radars["mmwave"].findtext("publish_camera") == "true"
+    assert radars["mmwave_forward"].findtext("publish_camera") == "false"
+    assert radars["mmwave"].findtext("publish_camera_info") == "true"
+    camera = variant.find(".//sensor[@name='cable_camera']")
+    assert camera.findtext("gz_frame_id") == "cable_camera"
+    assert variant.find(".//sensor[@name='pylon_semantic_camera']").findtext("pose") == camera.findtext("pose")
+    for profile in ("RADAR_U.yaml", "RADAR_F.yaml"):
+        config = yaml.safe_load(
+            (PACKAGE_ROOT / "Gazebo-simulation-assets/models/d4s_dc_drone_powerline_eval/radar" / profile).read_text())
+        assert config["mode"] == "AOP_FAST_POINT"
+        assert config["scatterers_path"] == "model://hcaa_pylon_setup/radar/scene_scatterers_r22_v1.json"
+    assert (
+        PACKAGE_ROOT / "Gazebo-simulation-assets/world_models/hcaa_pylon_setup/radar/scene_scatterers_r22_v1.json"
+    ).is_file()
+
+
+def test_generated_powerline_eval_variant_is_current():
+    script = PACKAGE_ROOT / "Gazebo-simulation-assets" / "scripts" / "create_powerline_eval_drone_variant.py"
+    result = subprocess.run([sys.executable, str(script), "--check"], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
 
 
 def test_static_transform_arguments_reject_non_euler_values():
