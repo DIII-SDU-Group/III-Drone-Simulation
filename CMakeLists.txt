@@ -6,6 +6,12 @@ if(POLICY CMP0144)
   set(CMAKE_POLICY_DEFAULT_CMP0144 NEW)
 endif()
 
+# r22 / WO-2026-09-29-002 Backlog 03: the simulator-v2 hot path is header-only C++; an unset build type
+# compiled it without optimisation (measured ~10x slower in Gazebo). Default to Release.
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+  set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
+
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
@@ -85,6 +91,7 @@ add_library(iii_drone_mmwave_conductor_sensor_plugin SHARED
   src/mmwave_conductor_sensor_plugin.cpp
 )
 target_compile_features(iii_drone_mmwave_conductor_sensor_plugin PRIVATE cxx_std_17)
+target_include_directories(iii_drone_mmwave_conductor_sensor_plugin PRIVATE include)
 target_link_libraries(iii_drone_mmwave_conductor_sensor_plugin
     ${III_DRONE_SIMULATION_GZ_SIM_TARGET}
     gz-plugin2::requested
@@ -100,6 +107,29 @@ ament_target_dependencies(iii_drone_mmwave_conductor_sensor_plugin
   iii_drone_interfaces
 )
 install(TARGETS iii_drone_mmwave_conductor_sensor_plugin DESTINATION lib)
+
+# r22 Backlog 03: optional CUDA candidate backend for simulator-v2 (CPU reference always built; selected at
+# runtime by processing.backend / III_AOP_BACKEND, CPU fallback when no device is available).
+option(III_DRONE_SIMULATION_CUDA "Build the optional CUDA simulator-v2 backend" ON)
+if(III_DRONE_SIMULATION_CUDA)
+  include(CheckLanguage)
+  check_language(CUDA)
+  if(CMAKE_CUDA_COMPILER)
+    enable_language(CUDA)
+    find_package(CUDAToolkit REQUIRED)
+    add_library(iii_drone_aop_radar_cuda STATIC src/aop_radar_cuda.cu)
+    set_target_properties(iii_drone_aop_radar_cuda PROPERTIES CUDA_ARCHITECTURES 75 POSITION_INDEPENDENT_CODE ON
+      CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED ON)
+    target_include_directories(iii_drone_aop_radar_cuda PRIVATE include)
+    target_compile_definitions(iii_drone_aop_radar_cuda PRIVATE AOP_WITH_CUDA)
+    target_compile_options(iii_drone_aop_radar_cuda PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-fmad=false>)
+    target_compile_definitions(iii_drone_mmwave_conductor_sensor_plugin PRIVATE AOP_WITH_CUDA)
+    target_link_libraries(iii_drone_mmwave_conductor_sensor_plugin iii_drone_aop_radar_cuda CUDA::cudart)
+    message(STATUS "iii_drone_simulation: CUDA simulator-v2 backend enabled")
+  else()
+    message(STATUS "iii_drone_simulation: no CUDA compiler; CPU simulator-v2 backend only")
+  endif()
+endif()
 
 add_library(iii_drone_sim_charger_gripper_plugin SHARED
   src/sim_charger_gripper_plugin.cpp
@@ -160,9 +190,16 @@ if(BUILD_TESTING)
   endif()
   find_package(ament_cmake_pytest REQUIRED)
 
-  ament_add_pytest_test(iii_drone_simulation_launch_smoke_test
-    test/test_launch_smoke.py
-  )
+  add_executable(mmwave_fov_geometry_test test/test_mmwave_fov_geometry.cpp)
+  target_compile_features(mmwave_fov_geometry_test PRIVATE cxx_std_17)
+  target_include_directories(mmwave_fov_geometry_test PRIVATE include)
+  add_test(NAME mmwave_fov_geometry_test COMMAND mmwave_fov_geometry_test)
+
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/test_launch_smoke.py")
+    ament_add_pytest_test(iii_drone_simulation_launch_smoke_test
+      test/test_launch_smoke.py
+    )
+  endif()
 endif()
 
 ament_package()
