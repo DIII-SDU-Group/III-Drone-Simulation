@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <limits>
 #include <map>
 #include <mutex>
@@ -585,15 +586,44 @@ void MmwaveConductorSensorPlugin::Configure(
   if (sdf->HasElement("peer_active_ms")) {this->peer_active_ms_ = sdf->Get<double>("peer_active_ms");}
   if (this->radar_model_ == "AOP_FAST_POINT")
   {
+    const std::string config_file = gz::common::findFile(this->aop_config_path_);
     try
     {
-      this->aop_config_ = aop_radar::load_model_config_file(gz::common::findFile(this->aop_config_path_));
+      this->aop_config_ = aop_radar::load_model_config_file(config_file);
     }
     catch (const std::exception & error)
     {
       gzerr << "MmwaveConductorSensorPlugin [" << this->radar_instance_ << "] failed to load AOP config ["
             << this->aop_config_path_ << "]: " << error.what() << "\n";
       return;
+    }
+    // scatterers_path may be a model:// URI, an absolute path, or a path
+    // relative to the configuration file.
+    const std::string scatterers = this->aop_config_.scatterers_path;
+    if (!scatterers.empty())
+    {
+      std::string resolved;
+      if (scatterers.find("://") != std::string::npos)
+      {
+        resolved = gz::common::findFile(scatterers);
+      }
+      else
+      {
+        std::filesystem::path path(scatterers);
+        if (path.is_relative())
+        {
+          path = std::filesystem::path(config_file).parent_path() / path;
+        }
+        resolved = path.lexically_normal().string();
+      }
+      if (resolved.empty() || !std::filesystem::is_regular_file(resolved))
+      {
+        gzerr << "MmwaveConductorSensorPlugin [" << this->radar_instance_
+              << "] cannot resolve scatterers_path [" << scatterers << "] from AOP config ["
+              << this->aop_config_path_ << "].\n";
+        return;
+      }
+      this->aop_config_.scatterers_path = resolved;
     }
     this->aop_mode_ = true;
   }
