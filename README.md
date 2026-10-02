@@ -14,7 +14,7 @@ This package provides:
 
 ### Launch Files
 
-- `launch/sim_assets.launch.py`: starts the simulated Gazebo asset bridge nodes, including `/clock`; with `/tf/sim/sensor_layout` `d4s_dc_drone_powerline_eval` it also bridges `/sensor/mmwave_forward/*`
+- `launch/sim_assets.launch.py`: starts the simulated Gazebo asset bridge nodes, including `/clock`; with `/tf/sim/sensor_layout` `d4s_dc_drone_powerline_eval` it also bridges `/sensor/mmwave_forward/*` and Gazebo's IMU samples to `/simulation/gazebo/imu` (arguments `gz_world`, `px4_instance` name the vehicle's Gazebo topic)
 - `launch/tf_sim.launch.py`: starts static transform publishers and the drone frame broadcaster for simulation; `/tf/sim/sensor_layout` selects the cable camera mount and, for `d4s_dc_drone_powerline_eval`, adds `drone -> mmwave_forward`
 
 These launch files are the main integration points consumed by the larger III launch stack when simulation mode is enabled.
@@ -35,9 +35,10 @@ These launch files are the main integration points consumed by the larger III la
   - `radar_model` `AOP_FAST_POINT` with `aop_config`, `radar_instance` and
     `radar_seed`: the simulator-v2 IWR6843AOP model
     (`include/iii_drone_simulation/aop_radar_*.hpp`);
-  - `publish_camera_info`, and `publish_ros_sensor_streams` for direct ROS
-    copies of the camera image and full cloud where no Gazebo bridge carries
-    them;
+  - `publish_camera_info` (emitted with each frame's stamp when the frame
+    arrives, ahead of its truth render), and `publish_ros_sensor_streams` for
+    direct ROS copies of the camera image and full cloud where no Gazebo bridge
+    carries them;
   - `-DIII_DRONE_SIMULATION_CUDA=ON` builds an optional CUDA backend for the
     simulator-v2 model; `III_DRONE_SIMULATION_OPTIMIZE_RADAR_KERNELS` (default
     `ON`) compiles the plugin with `-O2` in Debug builds.
@@ -47,10 +48,12 @@ These launch files are the main integration points consumed by the larger III la
 
   The `d4s_dc_drone_powerline_eval` model variant (Radar-U on `/sensor/mmwave`,
   Radar-F on `/sensor/mmwave_forward`, cable camera 20 deg from upward) runs
-  both radars on `AOP_FAST_POINT`; select it with `--sim-model
-  gz_d4s_dc_drone_powerline_eval` and the configuration constant
-  `/tf/sim/sensor_layout`. See `docs/perception-dataset-ground-truth.md` in the
-  workspace.
+  both radars on `AOP_FAST_POINT` and has no Gazebo magnetometer: PX4
+  simulates the field (`SENS_EN_MAGSIM`), because Gazebo's field disagrees with
+  PX4's world magnetic model and biases PX4's heading. Select it with
+  `--sim-model gz_d4s_dc_drone_powerline_eval` and the configuration constant
+  `/tf/sim/sensor_layout`. See `docs/perception-dataset-ground-truth.md` and
+  `docs/powerline-slam-integration.md` in the workspace.
 
 ### Support Assets
 

@@ -10,6 +10,8 @@ from iii_drone_configuration.schema_utils import resolve_active_parameter_file, 
 
 HIL_RATE_LIMITED_CAMERA_TOPIC = "/simulation/local/cable_camera/image_rate_limited"
 POWERLINE_EVAL_LAYOUT = "d4s_dc_drone_powerline_eval"
+# Gazebo's own IMU samples, whose stamps pair PX4's clock with the simulation's.
+GAZEBO_IMU_TOPIC = "/simulation/gazebo/imu"
 
 def _resolve_ros_params_file() -> str:
     seed_runtime_configuration("sim")
@@ -30,6 +32,8 @@ def generate_launch_description():
     use_camera_rate_limiter = LaunchConfiguration("use_camera_rate_limiter")
     camera_output_topic = LaunchConfiguration("camera_output_topic")
     camera_rate_hz = LaunchConfiguration("camera_rate_hz")
+    gz_world = LaunchConfiguration("gz_world")
+    px4_instance = LaunchConfiguration("px4_instance")
     include_diagnostics_arg = DeclareLaunchArgument(
         "include_diagnostics",
         default_value="true",
@@ -168,12 +172,29 @@ def generate_launch_description():
         condition=IfCondition(include_diagnostics),
     )
 
-    # The powerline SLAM evaluation layout adds the forward radar (Radar-F).
-    # The sensor plugin publishes its camera_info and evaluator truth on ROS
-    # directly, so no further bridges are needed.
+    # The powerline SLAM evaluation layout adds the forward radar (Radar-F) and
+    # Gazebo's IMU samples (PX4 subscribes to the same Gazebo topic). The
+    # sensor plugin publishes its camera_info and evaluator truth on ROS
+    # directly.
     layout_bridges = []
     if _sensor_layout() == POWERLINE_EVAL_LAYOUT:
         layout_bridges = [
+            DeclareLaunchArgument(
+                "gz_world",
+                default_value="hca_full_pylon_setup",
+                description="Gazebo world, for bridges of vehicle-scoped Gazebo topics",
+            ),
+            DeclareLaunchArgument(
+                "px4_instance",
+                default_value="0",
+                description="PX4 SITL instance, which names the vehicle's Gazebo model",
+            ),
+        ]
+        gazebo_imu = [
+            "/world/", gz_world, "/model/", POWERLINE_EVAL_LAYOUT, "_", px4_instance,
+            "/link/base_link/sensor/imu_sensor/imu",
+        ]
+        layout_bridges += [
             Node(
                 package='ros_gz_bridge',
                 executable='parameter_bridge',
@@ -196,6 +217,14 @@ def generate_launch_description():
                 arguments=["/simulation/ground_truth/mmwave_forward/conductor_labels@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked"],
                 parameters=_parameter_sources(),
                 condition=IfCondition(include_diagnostics),
+            ),
+            Node(
+                package='ros_gz_bridge',
+                executable='parameter_bridge',
+                name='gazebo_imu_gz_bridge',
+                arguments=[[*gazebo_imu, "@sensor_msgs/msg/Imu[gz.msgs.IMU"]],
+                remappings=[(gazebo_imu, GAZEBO_IMU_TOPIC)],
+                parameters=_parameter_sources(),
             ),
         ]
 

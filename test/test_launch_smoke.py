@@ -7,7 +7,8 @@ import xml.etree.ElementTree as ET
 
 import pytest
 import yaml
-from launch import LaunchDescription
+from launch import LaunchContext, LaunchDescription
+from launch.utilities import normalize_to_list_of_substitutions, perform_substitutions
 from launch_ros.actions import Node
 
 
@@ -284,7 +285,7 @@ def test_powerline_eval_layout_publishes_its_camera_mount_and_forward_radar_fram
     assert by_child["mmwave_forward"][-4:] == ["--frame-id", "drone", "--child-frame-id", "mmwave_forward"]
 
 
-def test_powerline_eval_layout_bridges_the_forward_radar(tmp_path, monkeypatch):
+def test_powerline_eval_layout_bridges_the_forward_radar_and_gazebo_imu(tmp_path, monkeypatch):
     _isolate_runtime_state(tmp_path, monkeypatch, "d4s_dc_drone_powerline_eval")
 
     sim_assets_module = _load_module("launch/sim_assets.launch.py")
@@ -292,7 +293,7 @@ def test_powerline_eval_layout_bridges_the_forward_radar(tmp_path, monkeypatch):
     nodes = [entity for entity in description.entities if isinstance(entity, Node)]
     bridges = {node._Node__node_name: node for node in nodes}
 
-    assert len(description.entities) == 18
+    assert len(description.entities) == 21
     assert bridges["mmwave_forward_gz_bridge"]._Node__arguments == [
         "/sensor/mmwave_forward/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked"
     ]
@@ -306,6 +307,22 @@ def test_powerline_eval_layout_bridges_the_forward_radar(tmp_path, monkeypatch):
     assert bridges["mmwave_forward_gz_bridge"].condition is None
     assert bridges["mmwave_forward_full_gz_bridge"].condition is not None
     assert bridges["mmwave_forward_labels_gz_bridge"].condition is not None
+
+    # Gazebo's IMU samples on the vehicle-scoped topic PX4 reads, renamed for ROS.
+    context = LaunchContext()
+    context.launch_configurations.update({"gz_world": "hca_full_pylon_setup", "px4_instance": "0"})
+    imu_bridge = bridges["gazebo_imu_gz_bridge"]
+    (argument,) = imu_bridge._Node__arguments
+    gazebo_topic = (
+        "/world/hca_full_pylon_setup/model/d4s_dc_drone_powerline_eval_0/link/base_link/sensor/imu_sensor/imu"
+    )
+    assert perform_substitutions(context, normalize_to_list_of_substitutions(argument)) == (
+        gazebo_topic + "@sensor_msgs/msg/Imu[gz.msgs.IMU"
+    )
+    ((remap_from, remap_to),) = imu_bridge._Node__remappings
+    assert perform_substitutions(context, remap_from) == gazebo_topic
+    assert perform_substitutions(context, remap_to) == "/simulation/gazebo/imu"
+    assert imu_bridge.condition is None
 
 
 def test_hil_launcher_leaves_world_to_drone_to_the_pi():
