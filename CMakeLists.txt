@@ -6,12 +6,6 @@ if(POLICY CMP0144)
   set(CMAKE_POLICY_DEFAULT_CMP0144 NEW)
 endif()
 
-# r22 / WO-2026-09-29-002 Backlog 03: the simulator-v2 hot path is header-only C++; an unset build type
-# compiled it without optimisation (measured ~10x slower in Gazebo). Default to Release.
-if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
-  set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
-endif()
-
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
@@ -108,9 +102,23 @@ ament_target_dependencies(iii_drone_mmwave_conductor_sensor_plugin
 )
 install(TARGETS iii_drone_mmwave_conductor_sensor_plugin DESTINATION lib)
 
-# r22 Backlog 03: optional CUDA candidate backend for simulator-v2 (CPU reference always built; selected at
-# runtime by processing.backend / III_AOP_BACKEND, CPU fallback when no device is available).
-option(III_DRONE_SIMULATION_CUDA "Build the optional CUDA simulator-v2 backend" ON)
+# The simulator-v2 radar model is header-only and compiled into the plugin
+# translation unit; unoptimised it runs about ten times slower in Gazebo.
+option(III_DRONE_SIMULATION_OPTIMIZE_RADAR_KERNELS
+  "Optimize the mmWave sensor plugin radar kernels in Debug builds" ON)
+if(III_DRONE_SIMULATION_OPTIMIZE_RADAR_KERNELS AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  set_property(SOURCE
+    "${PROJECT_SOURCE_DIR}/src/mmwave_conductor_sensor_plugin.cpp"
+    APPEND PROPERTY COMPILE_OPTIONS "$<$<CONFIG:Debug>:-O2>"
+  )
+endif()
+
+# Optional CUDA backend for the simulator-v2 radar model. The CPU reference is
+# always built; the backend is selected at runtime (processing.backend or
+# III_AOP_BACKEND) and falls back to the CPU when no device is available.
+option(III_DRONE_SIMULATION_CUDA "Build the optional CUDA simulator-v2 backend" OFF)
+set(III_DRONE_SIMULATION_CUDA_ARCHITECTURES "75" CACHE STRING
+  "CUDA architectures for the optional simulator-v2 backend")
 if(III_DRONE_SIMULATION_CUDA)
   include(CheckLanguage)
   check_language(CUDA)
@@ -118,8 +126,11 @@ if(III_DRONE_SIMULATION_CUDA)
     enable_language(CUDA)
     find_package(CUDAToolkit REQUIRED)
     add_library(iii_drone_aop_radar_cuda STATIC src/aop_radar_cuda.cu)
-    set_target_properties(iii_drone_aop_radar_cuda PROPERTIES CUDA_ARCHITECTURES 75 POSITION_INDEPENDENT_CODE ON
-      CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED ON)
+    set_target_properties(iii_drone_aop_radar_cuda PROPERTIES
+      CUDA_ARCHITECTURES "${III_DRONE_SIMULATION_CUDA_ARCHITECTURES}"
+      POSITION_INDEPENDENT_CODE ON
+      CUDA_STANDARD 17
+      CUDA_STANDARD_REQUIRED ON)
     target_include_directories(iii_drone_aop_radar_cuda PRIVATE include)
     target_compile_definitions(iii_drone_aop_radar_cuda PRIVATE AOP_WITH_CUDA)
     target_compile_options(iii_drone_aop_radar_cuda PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-fmad=false>)
@@ -188,18 +199,18 @@ if(BUILD_TESTING)
     target_include_directories(iii_drone_simulation_charger_gripper_jaws_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     target_link_libraries(iii_drone_simulation_charger_gripper_jaws_test gz-math7::core)
   endif()
+  ament_add_gtest(iii_drone_simulation_mmwave_fov_geometry_test
+    test/mmwave_fov_geometry_test.cpp
+  )
+  if(TARGET iii_drone_simulation_mmwave_fov_geometry_test)
+    target_compile_features(iii_drone_simulation_mmwave_fov_geometry_test PRIVATE cxx_std_17)
+    target_include_directories(iii_drone_simulation_mmwave_fov_geometry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  endif()
   find_package(ament_cmake_pytest REQUIRED)
 
-  add_executable(mmwave_fov_geometry_test test/test_mmwave_fov_geometry.cpp)
-  target_compile_features(mmwave_fov_geometry_test PRIVATE cxx_std_17)
-  target_include_directories(mmwave_fov_geometry_test PRIVATE include)
-  add_test(NAME mmwave_fov_geometry_test COMMAND mmwave_fov_geometry_test)
-
-  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/test_launch_smoke.py")
-    ament_add_pytest_test(iii_drone_simulation_launch_smoke_test
-      test/test_launch_smoke.py
-    )
-  endif()
+  ament_add_pytest_test(iii_drone_simulation_launch_smoke_test
+    test/test_launch_smoke.py
+  )
 endif()
 
 ament_package()

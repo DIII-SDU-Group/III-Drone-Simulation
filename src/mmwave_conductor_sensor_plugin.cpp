@@ -34,6 +34,7 @@
 #include <sensor_msgs/msg/camera_info.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <sensor_msgs/msg/point_field.hpp>
+#include <std_msgs/msg/header.hpp>
 #include <iii_drone_interfaces/msg/camera_frame_ground_truth.hpp>
 #include <iii_drone_interfaces/msg/pylon_camera_frame_ground_truth.hpp>
 #include <iii_drone_interfaces/msg/pylon_exact_mask_frame_ground_truth.hpp>
@@ -57,6 +58,8 @@ namespace
 constexpr double kDefaultMaxPointDist = 18.0;
 constexpr double kDefaultMinPointDist = 0.25;
 constexpr double kDefaultViewConeSlope = 0.7;
+// Half-angle of the FINITE_RECTANGULAR FOV used for powerline SLAM development.
+constexpr double kDefaultFiniteFovHalfAngleRad = 0.6107259643892086;
 constexpr double kDefaultPlaneHalfThickness = 0.08;
 constexpr double kDefaultSigmaAlong = 0.12;
 constexpr double kDefaultSigmaCross = 0.03;
@@ -160,6 +163,8 @@ class MmwaveConductorSensorPlugin :
     gz::math::Vector3d point_sensor;
     gz::math::Vector3d tangent_sensor;
     double range{};
+    double max_backward_span{};
+    double max_forward_span{};
     double segment_parameter{};
     double conductor_parameter{};
     std::uint16_t active_support_boundaries{};
@@ -235,6 +240,8 @@ class MmwaveConductorSensorPlugin :
       const gz::math::Pose3d & link_world_pose,
       std::uint64_t frame_sequence);
   private: void OnCameraImage(const gz::msgs::Image & image);
+
+  private: void PublishRosCameraImage(const gz::msgs::Image & image);
   // r21 simulator-v2 (AOP_FAST_POINT) path; LEGACY_GEOMETRIC keeps the original code unchanged.
   private: void AopUpdate(
       const gz::sim::UpdateInfo & info,
@@ -270,8 +277,8 @@ class MmwaveConductorSensorPlugin :
   private: std::string frame_id_{"mmwave"};
   private: std::string conductor_asset_uri_{
       "model://hcaa_pylon_setup/conductors.yaml"};
-  private: std::string pylon_asset_uri_{
-      "model://hcaa_pylon_setup/pylons.yaml"};
+  // Empty disables the evaluator-only pylon map, pylon returns and pylon truth.
+  private: std::string pylon_asset_uri_;
   private: gz::math::Pose3d sensor_pose_{
       0.0, 0.0, 0.1, 3.1415, -1.57079632679, 0.0};
   private: gz::math::Pose3d camera_pose_{
@@ -283,8 +290,12 @@ class MmwaveConductorSensorPlugin :
   private: double max_point_dist_{kDefaultMaxPointDist};
   private: double min_point_dist_{kDefaultMinPointDist};
   private: double view_cone_slope_{kDefaultViewConeSlope};
-  private: double azimuth_half_angle_rad_{std::atan(kDefaultViewConeSlope)};
-  private: double elevation_half_angle_rad_{std::atan(kDefaultViewConeSlope)};
+  private: double azimuth_half_angle_rad_{kDefaultFiniteFovHalfAngleRad};
+  private: double elevation_half_angle_rad_{kDefaultFiniteFovHalfAngleRad};
+  // VIEW_CONE: visible when x > view_cone_slope * hypot(y, z) and range <= max.
+  // FINITE_RECTANGULAR: min/max range and azimuth/elevation half-angles.
+  private: std::string fov_model_{"VIEW_CONE"};
+  private: bool finite_fov_{false};
   private: double plane_half_thickness_m_{kDefaultPlaneHalfThickness};
   private: double sigma_along_m_{kDefaultSigmaAlong};
   private: double sigma_cross_m_{kDefaultSigmaCross};
@@ -364,6 +375,10 @@ class MmwaveConductorSensorPlugin :
   private: bool publish_camera_{true};
   private: bool publish_drone_state_{true};
   private: bool publish_static_geometry_{true};
+  // Direct ROS copies of the camera image and full radar cloud. Off by default:
+  // sim_assets.launch.py bridges those topics from Gazebo.
+  private: bool publish_ros_sensor_streams_{false};
+  private: bool publish_camera_info_{false};
   private: std::string truth_v2_topic_;
   private: double schedule_offset_ms_{0.0};
   private: double schedule_jitter_sigma_us_{0.0};
@@ -478,10 +493,6 @@ void MmwaveConductorSensorPlugin::Configure(
   if (sdf->HasElement("view_cone_slope"))
   {
     this->view_cone_slope_ = sdf->Get<double>("view_cone_slope");
-    // Legacy worlds specified one symmetric cone slope. Preserve that contract
-    // unless an explicit rectangular azimuth/elevation FOV is supplied.
-    this->azimuth_half_angle_rad_ = std::atan(this->view_cone_slope_);
-    this->elevation_half_angle_rad_ = std::atan(this->view_cone_slope_);
   }
   if (sdf->HasElement("azimuth_half_angle_rad"))
   {
@@ -563,6 +574,9 @@ void MmwaveConductorSensorPlugin::Configure(
   if (sdf->HasElement("publish_camera")) {this->publish_camera_ = sdf->Get<bool>("publish_camera");}
   if (sdf->HasElement("publish_drone_state")) {this->publish_drone_state_ = sdf->Get<bool>("publish_drone_state");}
   if (sdf->HasElement("publish_static_geometry")) {this->publish_static_geometry_ = sdf->Get<bool>("publish_static_geometry");}
+  if (sdf->HasElement("publish_ros_sensor_streams")) {this->publish_ros_sensor_streams_ = sdf->Get<bool>("publish_ros_sensor_streams");}
+  if (sdf->HasElement("publish_camera_info")) {this->publish_camera_info_ = sdf->Get<bool>("publish_camera_info");}
+  if (sdf->HasElement("fov_model")) {this->fov_model_ = sdf->Get<std::string>("fov_model");}
   this->truth_v2_topic_ = "/simulation/ground_truth/" + this->radar_instance_ + "/scan_v2";
   if (sdf->HasElement("truth_v2_topic")) {this->truth_v2_topic_ = sdf->Get<std::string>("truth_v2_topic");}
   if (sdf->HasElement("schedule_offset_ms")) {this->schedule_offset_ms_ = sdf->Get<double>("schedule_offset_ms");}
@@ -589,12 +603,21 @@ void MmwaveConductorSensorPlugin::Configure(
     return;
   }
 
-  const mmwave_fov::SensorFov configured_fov{
-      this->min_point_dist_, this->max_point_dist_, this->azimuth_half_angle_rad_,
-      this->elevation_half_angle_rad_};
-  if (!mmwave_fov::IsFiniteFov(configured_fov))
+  if (this->fov_model_ == "FINITE_RECTANGULAR")
   {
-    gzerr << "MmwaveConductorSensorPlugin has an invalid finite FOV/range configuration.\n";
+    const mmwave_fov::SensorFov configured_fov{
+        this->min_point_dist_, this->max_point_dist_, this->azimuth_half_angle_rad_,
+        this->elevation_half_angle_rad_};
+    if (!mmwave_fov::IsFiniteFov(configured_fov))
+    {
+      gzerr << "MmwaveConductorSensorPlugin has an invalid finite FOV/range configuration.\n";
+      return;
+    }
+    this->finite_fov_ = true;
+  }
+  else if (this->fov_model_ != "VIEW_CONE")
+  {
+    gzerr << "MmwaveConductorSensorPlugin: unknown fov_model [" << this->fov_model_ << "]\n";
     return;
   }
 
@@ -651,33 +674,45 @@ void MmwaveConductorSensorPlugin::Configure(
         iii_drone_interfaces::msg::RadarScanGroundTruth>(
         "/simulation/ground_truth/mmwave/scan", rclcpp::QoS(1000).reliable());
   }
-  this->full_cloud_ros_publisher_ = this->ros_node_->create_publisher<sensor_msgs::msg::PointCloud2>(
-      // r22 D04-1: reliable, depth 100 (a depth-1 best-effort publisher lost 1 of 4445 Radar-F clouds under load)
-      this->full_topic_, rclcpp::QoS(100).reliable());
+  // Optional direct ROS copies of the full radar cloud and the camera image.
+  // They keep the original simulator stamps and raw payload bytes (transport
+  // adapters, not synthesized measurements) for setups where the Gazebo bridge
+  // in sim_assets.launch.py does not carry these topics, e.g. secondary radar
+  // instances. Enabling them alongside that bridge duplicates the topics.
+  if (this->publish_ros_sensor_streams_)
+  {
+    this->full_cloud_ros_publisher_ = this->ros_node_->create_publisher<sensor_msgs::msg::PointCloud2>(
+        // Reliable, depth 100: a depth-1 best-effort publisher dropped clouds under load.
+        this->full_topic_, rclcpp::QoS(100).reliable());
+  }
   if (this->publish_camera_)
   {
     this->camera_mask_ros_publisher_ = this->ros_node_->create_publisher<sensor_msgs::msg::Image>(
         this->camera_mask_topic_, rclcpp::QoS(100).reliable());
-    // Publish the camera and full radar recorder inputs directly from this
-    // source-owning plugin.  The generic Gazebo bridge advertised both topics
-    // but did not deliver samples for these message forms on the deployed stack.
-    // These publishers retain the original simulator stamps and raw payload
-    // bytes; they are transport adapters, not synthesized measurements.
-    this->camera_image_ros_publisher_ = this->ros_node_->create_publisher<sensor_msgs::msg::Image>(
-        this->camera_image_topic_, rclcpp::QoS(100).reliable());
-    this->pylon_mask_ros_publisher_ = this->ros_node_->create_publisher<sensor_msgs::msg::Image>(
-        this->pylon_mask_topic_, rclcpp::QoS(100).reliable());
-    this->camera_info_publisher_ = this->ros_node_->create_publisher<sensor_msgs::msg::CameraInfo>(
-        this->camera_info_topic_, rclcpp::QoS(100).reliable());
+    if (this->publish_ros_sensor_streams_)
+    {
+      this->camera_image_ros_publisher_ = this->ros_node_->create_publisher<sensor_msgs::msg::Image>(
+          this->camera_image_topic_, rclcpp::QoS(100).reliable());
+    }
+    if (this->publish_camera_info_)
+    {
+      this->camera_info_publisher_ = this->ros_node_->create_publisher<sensor_msgs::msg::CameraInfo>(
+          this->camera_info_topic_, rclcpp::QoS(100).reliable());
+    }
     this->camera_truth_publisher_ = this->ros_node_->create_publisher<
         iii_drone_interfaces::msg::CameraFrameGroundTruth>(
         "/simulation/ground_truth/cable_camera/frame", rclcpp::QoS(100).reliable());
-    this->pylon_camera_truth_publisher_ = this->ros_node_->create_publisher<
-        iii_drone_interfaces::msg::PylonCameraFrameGroundTruth>(
-        "/simulation/ground_truth/cable_camera/pylon_frame", rclcpp::QoS(100).reliable());
-    this->pylon_exact_mask_truth_publisher_ = this->ros_node_->create_publisher<
-        iii_drone_interfaces::msg::PylonExactMaskFrameGroundTruth>(
-        "/simulation/ground_truth/cable_camera/pylon_exact_frame", rclcpp::QoS(100).reliable());
+    if (!this->pylons_.empty())
+    {
+      this->pylon_mask_ros_publisher_ = this->ros_node_->create_publisher<sensor_msgs::msg::Image>(
+          this->pylon_mask_topic_, rclcpp::QoS(100).reliable());
+      this->pylon_camera_truth_publisher_ = this->ros_node_->create_publisher<
+          iii_drone_interfaces::msg::PylonCameraFrameGroundTruth>(
+          "/simulation/ground_truth/cable_camera/pylon_frame", rclcpp::QoS(100).reliable());
+      this->pylon_exact_mask_truth_publisher_ = this->ros_node_->create_publisher<
+          iii_drone_interfaces::msg::PylonExactMaskFrameGroundTruth>(
+          "/simulation/ground_truth/cable_camera/pylon_exact_frame", rclcpp::QoS(100).reliable());
+    }
   }
   if (this->publish_static_geometry_ || this->publish_camera_)
   {
@@ -763,7 +798,7 @@ void MmwaveConductorSensorPlugin::Configure(
           << this->camera_image_topic_ << "].\n";
     return;
   }
-  if (this->publish_camera_ && !this->transport_node_.Subscribe(
+  if (this->publish_camera_ && !this->pylons_.empty() && !this->transport_node_.Subscribe(
       this->pylon_semantic_topic_,
       &MmwaveConductorSensorPlugin::OnPylonSemanticImage, this))
   {
@@ -901,6 +936,11 @@ void MmwaveConductorSensorPlugin::PostUpdate(
     const gz::math::Vector3d noisy_point_sensor =
         this->ApplyMeasurementNoise(best_candidate.value());
 
+    if (!this->finite_fov_ && !this->IsInFov(noisy_point_sensor))
+    {
+      continue;
+    }
+
     auto point = this->AddRadarSideInformation(
         noisy_point_sensor, sensor_velocity_sensor);
     point.ideal_generating_point_sensor = best_candidate->point_sensor;
@@ -926,8 +966,8 @@ void MmwaveConductorSensorPlugin::PostUpdate(
   }
 
   // Development-only pylon support is a bounded physical proxy: one vertical
-  // support segment per source-mapped pylon.  It reuses the unchanged finite
-  // FOV, range, Doppler, SNR, and noise model, while publishing a distinct
+  // support segment per source-mapped pylon.  It reuses the configured FOV,
+  // range, Doppler, SNR, and noise model, while publishing a distinct
   // evaluator identity so no pylon return can be mistaken for a conductor.
   if (this->pylon_returns_enabled_)
   {
@@ -945,6 +985,10 @@ void MmwaveConductorSensorPlugin::PostUpdate(
         continue;
       }
       const auto noisy_point_sensor = this->ApplyMeasurementNoise(candidate.value());
+      if (!this->finite_fov_ && !this->IsInFov(noisy_point_sensor))
+      {
+        continue;
+      }
       auto point = this->AddRadarSideInformation(noisy_point_sensor, sensor_velocity_sensor);
       point.ideal_generating_point_sensor = candidate->point_sensor;
       point.ideal_generating_point_world = sensor_world_pose.Pos() +
@@ -1029,6 +1073,12 @@ bool MmwaveConductorSensorPlugin::LoadConductors(const std::string & asset_uri)
 
 bool MmwaveConductorSensorPlugin::LoadPylons(const std::string & asset_uri)
 {
+  this->pylons_.clear();
+  if (asset_uri.empty())
+  {
+    return true;
+  }
+
   const std::string asset_path = gz::common::findFile(asset_uri);
   if (asset_path.empty())
   {
@@ -1046,7 +1096,6 @@ bool MmwaveConductorSensorPlugin::LoadPylons(const std::string & asset_uri)
     return false;
   }
 
-  this->pylons_.clear();
   this->pylons_.reserve(pylons_node.size());
   for (const auto & pylon_node : pylons_node)
   {
@@ -1200,6 +1249,42 @@ MmwaveConductorSensorPlugin::ProjectClosestPointOnSegment(
     return std::nullopt;
   }
 
+  if (!this->finite_fov_)
+  {
+    // VIEW_CONE: the unconstrained closest point on the segment, kept only if
+    // it lies inside the cone.
+    double interpolation = 0.0;
+    const double squared_length = segment_sensor.SquaredLength();
+    if (squared_length > 1e-12)
+    {
+      interpolation = std::clamp(
+          -start_sensor.Dot(segment_sensor) / squared_length,
+          0.0,
+          1.0);
+    }
+
+    const gz::math::Vector3d point_sensor =
+        start_sensor + segment_sensor * interpolation;
+    if (!this->IsInFov(point_sensor))
+    {
+      return std::nullopt;
+    }
+
+    DetectionCandidate candidate;
+    candidate.point_sensor = point_sensor;
+    candidate.tangent_sensor = segment_sensor / segment_length;
+    candidate.range = point_sensor.Length();
+    candidate.max_backward_span = interpolation * segment_length;
+    candidate.max_forward_span = (1.0 - interpolation) * segment_length;
+    candidate.segment_parameter = interpolation;
+    if (candidate.range > 1e-12)
+    {
+      candidate.line_of_sight_tangent_angle_rad = std::acos(std::clamp(
+          std::abs(point_sensor.Dot(candidate.tangent_sensor)) / candidate.range, 0.0, 1.0));
+    }
+    return candidate;
+  }
+
   const mmwave_fov::SensorFov fov{
       this->min_point_dist_, this->max_point_dist_, this->azimuth_half_angle_rad_,
       this->elevation_half_angle_rad_};
@@ -1225,6 +1310,18 @@ MmwaveConductorSensorPlugin::ProjectClosestPointOnSegment(
 bool MmwaveConductorSensorPlugin::IsInFov(
     const gz::math::Vector3d & point_sensor) const
 {
+  if (!this->finite_fov_)
+  {
+    const double range = point_sensor.Length();
+    if (range > this->max_point_dist_)
+    {
+      return false;
+    }
+
+    const double yz_distance = std::hypot(point_sensor.Y(), point_sensor.Z());
+    return point_sensor.X() > this->view_cone_slope_ * yz_distance;
+  }
+
   return mmwave_fov::IsVisible(
       {point_sensor.X(), point_sensor.Y(), point_sensor.Z()},
       {this->min_point_dist_, this->max_point_dist_, this->azimuth_half_angle_rad_,
@@ -1234,10 +1331,16 @@ bool MmwaveConductorSensorPlugin::IsInFov(
 gz::math::Vector3d MmwaveConductorSensorPlugin::ApplyMeasurementNoise(
     const DetectionCandidate & candidate)
 {
-  // Visibility determines the physical source point before this function is
-  // entered. Measurement noise must never select a different source point or
-  // turn an invisible conductor into a generated return.
-  const double along_noise = this->unit_normal_(this->random_generator_) * this->sigma_along_m_;
+  // FINITE_RECTANGULAR: visibility determines the physical source point before
+  // this function is entered, so noise is not bounded by the segment. VIEW_CONE
+  // keeps the along-conductor noise on the segment and re-checks visibility
+  // after noise.
+  double along_noise = this->unit_normal_(this->random_generator_) * this->sigma_along_m_;
+  if (!this->finite_fov_)
+  {
+    along_noise = std::clamp(
+        along_noise, -candidate.max_backward_span, candidate.max_forward_span);
+  }
 
   gz::math::Vector3d noisy_point =
       candidate.point_sensor + candidate.tangent_sensor * along_noise;
@@ -1400,32 +1503,35 @@ void MmwaveConductorSensorPlugin::PublishPointCloud(
   this->full_publisher_.Publish(full_message);
   this->label_publisher_.Publish(label_message);
 
-  sensor_msgs::msg::PointCloud2 ros_full_message;
-  ros_full_message.header.stamp = ToRosTime(gz::msgs::Convert(sim_time));
-  ros_full_message.header.frame_id = this->frame_id_;
-  ros_full_message.height = full_message.height();
-  ros_full_message.width = full_message.width();
-  ros_full_message.is_bigendian = false;
-  ros_full_message.is_dense = full_message.is_dense();
-  ros_full_message.point_step = full_message.point_step();
-  ros_full_message.row_step = full_message.row_step();
-  const auto add_field = [&ros_full_message](const char * name, std::uint32_t offset)
-    {
-      sensor_msgs::msg::PointField field;
-      field.name = name;
-      field.offset = offset;
-      field.datatype = sensor_msgs::msg::PointField::FLOAT32;
-      field.count = 1;
-      ros_full_message.fields.push_back(std::move(field));
-    };
-  add_field("x", 0);
-  add_field("y", sizeof(float));
-  add_field("z", 2 * sizeof(float));
-  add_field("velocity", 3 * sizeof(float));
-  add_field("snr", 4 * sizeof(float));
-  add_field("noise", 5 * sizeof(float));
-  ros_full_message.data.assign(full_message.data().begin(), full_message.data().end());
-  this->full_cloud_ros_publisher_->publish(ros_full_message);
+  if (this->full_cloud_ros_publisher_)
+  {
+    sensor_msgs::msg::PointCloud2 ros_full_message;
+    ros_full_message.header.stamp = ToRosTime(gz::msgs::Convert(sim_time));
+    ros_full_message.header.frame_id = this->frame_id_;
+    ros_full_message.height = full_message.height();
+    ros_full_message.width = full_message.width();
+    ros_full_message.is_bigendian = false;
+    ros_full_message.is_dense = full_message.is_dense();
+    ros_full_message.point_step = full_message.point_step();
+    ros_full_message.row_step = full_message.row_step();
+    const auto add_field = [&ros_full_message](const char * name, std::uint32_t offset)
+      {
+        sensor_msgs::msg::PointField field;
+        field.name = name;
+        field.offset = offset;
+        field.datatype = sensor_msgs::msg::PointField::FLOAT32;
+        field.count = 1;
+        ros_full_message.fields.push_back(std::move(field));
+      };
+    add_field("x", 0);
+    add_field("y", sizeof(float));
+    add_field("z", 2 * sizeof(float));
+    add_field("velocity", 3 * sizeof(float));
+    add_field("snr", 4 * sizeof(float));
+    add_field("noise", 5 * sizeof(float));
+    ros_full_message.data.assign(full_message.data().begin(), full_message.data().end());
+    this->full_cloud_ros_publisher_->publish(ros_full_message);
+  }
 
   iii_drone_interfaces::msg::RadarScanGroundTruth truth;
   truth.header.stamp = ToRosTime(sim_time);
@@ -1600,22 +1706,25 @@ void MmwaveConductorSensorPlugin::PublishCameraGroundTruth(
   std::memcpy(ros_mask.data.data(), labels.data(), ros_mask.data.size());
   this->camera_mask_ros_publisher_->publish(ros_mask);
 
-  // Calibration is emitted on the same simulator source timestamp as the
-  // rendered image/mask.  It is an explicit bag topic rather than an
-  // out-of-band runtime default, so an offline replay can bind each frame to
-  // the calibrated project-owned camera model.
-  sensor_msgs::msg::CameraInfo camera_info;
-  camera_info.header = ros_mask.header;
-  camera_info.width = this->camera_width_;
-  camera_info.height = this->camera_height_;
-  camera_info.distortion_model = "plumb_bob";
-  camera_info.d = {0.0, 0.0, 0.0, 0.0, 0.0};
-  camera_info.k = {focal_length, 0.0, center_x, 0.0, focal_length, center_y, 0.0, 0.0, 1.0};
-  camera_info.r = {1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
-  camera_info.p = {focal_length, 0.0, center_x, 0.0,
-                   0.0, focal_length, center_y, 0.0,
-                   0.0, 0.0, 1.0, 0.0};
-  this->camera_info_publisher_->publish(camera_info);
+  if (this->camera_info_publisher_)
+  {
+    // Calibration is emitted on the same simulator source timestamp as the
+    // rendered image/mask.  It is an explicit bag topic rather than an
+    // out-of-band runtime default, so an offline replay can bind each frame to
+    // the calibrated project-owned camera model.
+    sensor_msgs::msg::CameraInfo camera_info;
+    camera_info.header = ros_mask.header;
+    camera_info.width = this->camera_width_;
+    camera_info.height = this->camera_height_;
+    camera_info.distortion_model = "plumb_bob";
+    camera_info.d = {0.0, 0.0, 0.0, 0.0, 0.0};
+    camera_info.k = {focal_length, 0.0, center_x, 0.0, focal_length, center_y, 0.0, 0.0, 1.0};
+    camera_info.r = {1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
+    camera_info.p = {focal_length, 0.0, center_x, 0.0,
+                     0.0, focal_length, center_y, 0.0,
+                     0.0, 0.0, 1.0, 0.0};
+    this->camera_info_publisher_->publish(camera_info);
+  }
 
   iii_drone_interfaces::msg::CameraFrameGroundTruth frame_truth;
   frame_truth.header = ros_mask.header;
@@ -1695,6 +1804,51 @@ void MmwaveConductorSensorPlugin::OnCameraImage(const gz::msgs::Image & image)
     }
     link_world_pose = this->latest_link_world_pose_;
   }
+
+  const auto stamp_ns = StampNanoseconds(image.header().stamp());
+  std::uint64_t frame_sequence{};
+  std::optional<PendingPylonFrame> pending_pylon;
+  {
+    std::lock_guard<std::mutex> lock(this->camera_registration_mutex_);
+    frame_sequence = this->camera_frame_sequence_++;
+    // Evaluator pylon frames are registered to RGB frames by source stamp,
+    // only when a pylon map is configured.
+    if (!this->pylons_.empty())
+    {
+      const auto pending = this->pending_pylon_frames_.find(stamp_ns);
+      if (pending != this->pending_pylon_frames_.end())
+      {
+        pending_pylon = std::move(pending->second);
+        this->pending_pylon_frames_.erase(pending);
+      }
+      else
+      {
+        this->camera_frame_identities_[stamp_ns] = frame_sequence;
+      }
+      while (this->camera_frame_identities_.size() > kCameraRegistrationWindowFrames)
+      {
+        RCLCPP_ERROR(
+          this->ros_node_->get_logger(),
+          "Dropping unmatched RGB frame identity at source stamp %lld; registration fails closed.",
+          static_cast<long long>(this->camera_frame_identities_.begin()->first));
+        this->camera_frame_identities_.erase(this->camera_frame_identities_.begin());
+      }
+    }
+  }
+  if (this->camera_image_ros_publisher_)
+  {
+    this->PublishRosCameraImage(image);
+  }
+  this->PublishCameraGroundTruth(image.header().stamp(), link_world_pose, frame_sequence);
+  if (pending_pylon)
+  {
+    this->PublishPylonSemanticImage(
+      pending_pylon->image, pending_pylon->link_world_pose, frame_sequence);
+  }
+}
+
+void MmwaveConductorSensorPlugin::PublishRosCameraImage(const gz::msgs::Image & image)
+{
   sensor_msgs::msg::Image ros_image;
   ros_image.header.stamp = ToRosTime(image.header().stamp());
   ros_image.header.frame_id = "cable_camera";
@@ -1725,39 +1879,7 @@ void MmwaveConductorSensorPlugin::OnCameraImage(const gz::msgs::Image & image)
       return;
   }
   ros_image.data.assign(image.data().begin(), image.data().end());
-
-  const auto stamp_ns = StampNanoseconds(image.header().stamp());
-  std::uint64_t frame_sequence{};
-  std::optional<PendingPylonFrame> pending_pylon;
-  {
-    std::lock_guard<std::mutex> lock(this->camera_registration_mutex_);
-    frame_sequence = this->camera_frame_sequence_++;
-    const auto pending = this->pending_pylon_frames_.find(stamp_ns);
-    if (pending != this->pending_pylon_frames_.end())
-    {
-      pending_pylon = std::move(pending->second);
-      this->pending_pylon_frames_.erase(pending);
-    }
-    else
-    {
-      this->camera_frame_identities_[stamp_ns] = frame_sequence;
-    }
-    while (this->camera_frame_identities_.size() > kCameraRegistrationWindowFrames)
-    {
-      RCLCPP_ERROR(
-        this->ros_node_->get_logger(),
-        "Dropping unmatched RGB frame identity at source stamp %lld; registration fails closed.",
-        static_cast<long long>(this->camera_frame_identities_.begin()->first));
-      this->camera_frame_identities_.erase(this->camera_frame_identities_.begin());
-    }
-  }
   this->camera_image_ros_publisher_->publish(ros_image);
-  this->PublishCameraGroundTruth(image.header().stamp(), link_world_pose, frame_sequence);
-  if (pending_pylon)
-  {
-    this->PublishPylonSemanticImage(
-      pending_pylon->image, pending_pylon->link_world_pose, frame_sequence);
-  }
 }
 
 void MmwaveConductorSensorPlugin::OnPylonSemanticImage(const gz::msgs::Image & image)
@@ -2155,30 +2277,35 @@ void MmwaveConductorSensorPlugin::PublishAopScan(
   this->full_publisher_.Publish(full_message);
   this->label_publisher_.Publish(label_message);
 
-  sensor_msgs::msg::PointCloud2 ros_full;
-  ros_full.header.stamp = ToRosTime(gz::msgs::Convert(sim_time));
-  ros_full.header.frame_id = this->frame_id_;
-  ros_full.height = 1;
-  ros_full.width = n;
-  ros_full.is_bigendian = false;
-  ros_full.is_dense = true;
-  ros_full.point_step = full_message.point_step();
-  ros_full.row_step = full_message.row_step();
-  const char * names[] = {"x", "y", "z", "velocity", "snr", "noise"};
-  for (std::uint32_t i = 0; i < 6; ++i)
+  std_msgs::msg::Header scan_header;
+  scan_header.stamp = ToRosTime(gz::msgs::Convert(sim_time));
+  scan_header.frame_id = this->frame_id_;
+  if (this->full_cloud_ros_publisher_)
   {
-    sensor_msgs::msg::PointField field;
-    field.name = names[i];
-    field.offset = i * sizeof(float);
-    field.datatype = sensor_msgs::msg::PointField::FLOAT32;
-    field.count = 1;
-    ros_full.fields.push_back(std::move(field));
+    sensor_msgs::msg::PointCloud2 ros_full;
+    ros_full.header = scan_header;
+    ros_full.height = 1;
+    ros_full.width = n;
+    ros_full.is_bigendian = false;
+    ros_full.is_dense = true;
+    ros_full.point_step = full_message.point_step();
+    ros_full.row_step = full_message.row_step();
+    const char * names[] = {"x", "y", "z", "velocity", "snr", "noise"};
+    for (std::uint32_t i = 0; i < 6; ++i)
+    {
+      sensor_msgs::msg::PointField field;
+      field.name = names[i];
+      field.offset = i * sizeof(float);
+      field.datatype = sensor_msgs::msg::PointField::FLOAT32;
+      field.count = 1;
+      ros_full.fields.push_back(std::move(field));
+    }
+    ros_full.data.assign(full_message.data().begin(), full_message.data().end());
+    this->full_cloud_ros_publisher_->publish(ros_full);
   }
-  ros_full.data.assign(full_message.data().begin(), full_message.data().end());
-  this->full_cloud_ros_publisher_->publish(ros_full);
 
   iii_drone_interfaces::msg::RadarScanTruthV2 truth;
-  truth.header = ros_full.header;
+  truth.header = scan_header;
   truth.radar_instance = this->radar_instance_;
   truth.radar_model = this->radar_model_;
   truth.profile_id = this->aop_config_.profile_id;
