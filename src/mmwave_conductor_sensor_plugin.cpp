@@ -243,6 +243,7 @@ class MmwaveConductorSensorPlugin :
   private: void OnCameraImage(const gz::msgs::Image & image);
 
   private: void PublishRosCameraImage(const gz::msgs::Image & image);
+  private: void PublishCameraInfo(const gz::msgs::Time & stamp);
   // r21 simulator-v2 (AOP_FAST_POINT) path; LEGACY_GEOMETRIC keeps the original code unchanged.
   private: void AopUpdate(
       const gz::sim::UpdateInfo & info,
@@ -1736,26 +1737,6 @@ void MmwaveConductorSensorPlugin::PublishCameraGroundTruth(
   std::memcpy(ros_mask.data.data(), labels.data(), ros_mask.data.size());
   this->camera_mask_ros_publisher_->publish(ros_mask);
 
-  if (this->camera_info_publisher_)
-  {
-    // Calibration is emitted on the same simulator source timestamp as the
-    // rendered image/mask.  It is an explicit bag topic rather than an
-    // out-of-band runtime default, so an offline replay can bind each frame to
-    // the calibrated project-owned camera model.
-    sensor_msgs::msg::CameraInfo camera_info;
-    camera_info.header = ros_mask.header;
-    camera_info.width = this->camera_width_;
-    camera_info.height = this->camera_height_;
-    camera_info.distortion_model = "plumb_bob";
-    camera_info.d = {0.0, 0.0, 0.0, 0.0, 0.0};
-    camera_info.k = {focal_length, 0.0, center_x, 0.0, focal_length, center_y, 0.0, 0.0, 1.0};
-    camera_info.r = {1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
-    camera_info.p = {focal_length, 0.0, center_x, 0.0,
-                     0.0, focal_length, center_y, 0.0,
-                     0.0, 0.0, 1.0, 0.0};
-    this->camera_info_publisher_->publish(camera_info);
-  }
-
   iii_drone_interfaces::msg::CameraFrameGroundTruth frame_truth;
   frame_truth.header = ros_mask.header;
   frame_truth.source_image_topic = this->camera_image_topic_;
@@ -1823,8 +1804,40 @@ void MmwaveConductorSensorPlugin::PublishCameraGroundTruth(
   this->conductor_id_map_publisher_.Publish(id_map);
 }
 
+void MmwaveConductorSensorPlugin::PublishCameraInfo(const gz::msgs::Time & stamp)
+{
+  // Calibration is emitted on the frame's simulator source timestamp when the
+  // frame arrives, ahead of the frame's ground-truth render, which can run
+  // behind real time.  It is an explicit bag topic rather than an out-of-band
+  // runtime default, so an offline replay can bind each frame to the
+  // calibrated project-owned camera model.
+  const double focal_length =
+      0.5 * static_cast<double>(this->camera_width_) /
+      std::tan(0.5 * this->camera_horizontal_fov_rad_);
+  const double center_x = 0.5 * (static_cast<double>(this->camera_width_) - 1.0);
+  const double center_y = 0.5 * (static_cast<double>(this->camera_height_) - 1.0);
+  sensor_msgs::msg::CameraInfo camera_info;
+  camera_info.header.stamp = ToRosTime(stamp);
+  camera_info.header.frame_id = "cable_camera";
+  camera_info.width = this->camera_width_;
+  camera_info.height = this->camera_height_;
+  camera_info.distortion_model = "plumb_bob";
+  camera_info.d = {0.0, 0.0, 0.0, 0.0, 0.0};
+  camera_info.k = {focal_length, 0.0, center_x, 0.0, focal_length, center_y, 0.0, 0.0, 1.0};
+  camera_info.r = {1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
+  camera_info.p = {focal_length, 0.0, center_x, 0.0,
+                   0.0, focal_length, center_y, 0.0,
+                   0.0, 0.0, 1.0, 0.0};
+  this->camera_info_publisher_->publish(camera_info);
+}
+
 void MmwaveConductorSensorPlugin::OnCameraImage(const gz::msgs::Image & image)
 {
+  if (this->camera_info_publisher_)
+  {
+    this->PublishCameraInfo(image.header().stamp());
+  }
+
   gz::math::Pose3d link_world_pose;
   {
     std::lock_guard<std::mutex> lock(this->camera_pose_mutex_);
