@@ -526,6 +526,22 @@ def test_px4_gazebo_model_has_continuous_magnetometer_source():
     assert "SENS_EN_MAGSIM" not in airframe_path.read_text()
 
 
+def test_powerline_eval_variant_uses_px4_simulated_magnetometer():
+    # PX4 reads Gazebo's magnetometer with a declination that disagrees with
+    # its world magnetic model, which biases its heading against truth; the
+    # evaluation variant uses PX4's simulated magnetometer instead.
+    variant = _model_root("d4s_dc_drone_powerline_eval")
+    airframe = (
+        PACKAGE_ROOT
+        / "Gazebo-simulation-assets"
+        / "init.d-posix_airframes"
+        / "99997_gz_d4s_dc_drone_powerline_eval"
+    ).read_text()
+
+    assert variant.findall(".//sensor[@type='magnetometer']") == []
+    assert "param set-default SENS_EN_MAGSIM 1\n" in airframe
+
+
 def test_sim_airframe_tolerates_short_mavlink_joystick_gaps():
     airframe_path = (
         PACKAGE_ROOT
