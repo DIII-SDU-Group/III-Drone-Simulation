@@ -368,6 +368,23 @@ def test_px4_gazebo_model_has_continuous_magnetometer_source():
     assert "SENS_EN_MAGSIM" not in airframe_path.read_text()
 
 
+def test_sim_airframe_uses_the_simulated_field_declination():
+    # Gazebo's magnetometer field has a declination of +3.12 deg at the world's
+    # location where PX4's world magnetic model gives +4.30 deg; the SITL
+    # airframe makes the EKF use the simulated field's declination and fuse the
+    # heading of Gazebo's magnetometer.
+    airframe = (
+        PACKAGE_ROOT / "Gazebo-simulation-assets" / "init.d-posix_airframes" / "99999_gz_d4s_dc_drone"
+    ).read_text()
+    assert "param set EKF2_DECL_TYPE 2\n" in airframe
+    assert "param set EKF2_MAG_DECL 3.12\n" in airframe
+    assert "param set-default EKF2_MAG_TYPE 1\n" in airframe
+    # III's PX4 maps the body-frame view of the true field (gz_bridge).
+    world = ET.parse(PACKAGE_ROOT / "Gazebo-simulation-assets" / "worlds" / "hca_full_pylon_setup.sdf").getroot()
+    (magnetometer_system,) = world.findall(".//plugin[@name='gz::sim::systems::Magnetometer']")
+    assert magnetometer_system.findtext("use_earth_frame_ned") == "false"
+
+
 def test_sim_airframe_tolerates_short_mavlink_joystick_gaps():
     airframe_path = (
         PACKAGE_ROOT
