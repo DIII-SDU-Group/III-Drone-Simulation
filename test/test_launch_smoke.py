@@ -560,10 +560,7 @@ def test_sim_airframe_uses_the_simulated_field_declination():
     assert magnetometer_system.findtext("use_earth_frame_ned") == "false"
 
 
-def test_powerline_eval_variant_uses_px4_simulated_magnetometer():
-    # PX4 reads Gazebo's magnetometer with a declination that disagrees with
-    # its world magnetic model, which biases its heading against truth; the
-    # evaluation variant uses PX4's simulated magnetometer instead.
+def test_powerline_eval_variant_keeps_the_production_magnetometer():
     variant = _model_root("d4s_dc_drone_powerline_eval")
     airframe = (
         PACKAGE_ROOT
@@ -572,8 +569,10 @@ def test_powerline_eval_variant_uses_px4_simulated_magnetometer():
         / "99997_gz_d4s_dc_drone_powerline_eval"
     ).read_text()
 
-    assert variant.findall(".//sensor[@type='magnetometer']") == []
-    assert "param set-default SENS_EN_MAGSIM 1\n" in airframe
+    assert len(variant.findall(".//sensor[@type='magnetometer']")) == 1
+    assert "SENS_EN_MAGSIM" not in airframe
+    for line in ("param set EKF2_DECL_TYPE 2\n", "param set EKF2_MAG_DECL 3.12\n", "param set-default EKF2_MAG_TYPE 1\n"):
+        assert line in airframe
 
 
 def test_sim_airframe_tolerates_short_mavlink_joystick_gaps():
