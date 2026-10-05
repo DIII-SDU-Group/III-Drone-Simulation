@@ -385,6 +385,20 @@ def test_sim_airframe_uses_the_simulated_field_declination():
     assert magnetometer_system.findtext("use_earth_frame_ned") == "false"
 
 
+def test_sim_airframes_spawn_the_vehicle_at_rest_on_the_terrain():
+    # hca_full_pylon_setup's terrain lies 3.0 cm below the world origin, where
+    # PX4 spawns the vehicle; dropped onto it while PX4 starts, the EKF
+    # initialises on the landing impact with a horizontal accelerometer bias.
+    airframes = PACKAGE_ROOT / "Gazebo-simulation-assets" / "init.d-posix_airframes"
+    for airframe in ("99999_gz_d4s_dc_drone", "99998_gz_d4s_dc_drone_paper"):
+        text = (airframes / airframe).read_text()
+        assert "PX4_GZ_WORLD=${PX4_GZ_WORLD:=hca_full_pylon_setup}\n" in text
+        assert (
+            'if [ "$PX4_GZ_WORLD" = "hca_full_pylon_setup" ]; then\n'
+            "\tPX4_GZ_MODEL_POSE=${PX4_GZ_MODEL_POSE:=0,0,-0.028}\nfi\n"
+        ) in text, airframe
+
+
 def test_sim_airframe_tolerates_short_mavlink_joystick_gaps():
     airframe_path = (
         PACKAGE_ROOT
