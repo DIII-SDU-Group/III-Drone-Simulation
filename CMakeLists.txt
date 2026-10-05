@@ -135,6 +135,12 @@ install(PROGRAMS
   RENAME rate_limited_image_relay
 )
 
+install(PROGRAMS
+  iii_drone_simulation/simulated_lab_mocap_gateway.py
+  DESTINATION lib/${PROJECT_NAME}
+  RENAME simulated_lab_mocap_gateway
+)
+
 # Export information to downstream packages
 if(ROS_DISTRO IN_LIST ROS_DISTROS)
   ament_export_dependencies(ament_cmake rclcpp rosidl_default_runtime eigen3_cmake_module Eigen3 px4_msgs geometry_msgs sensor_msgs OpenCV)
@@ -162,6 +168,12 @@ if(BUILD_TESTING)
 
   ament_add_pytest_test(iii_drone_simulation_launch_smoke_test
     test/test_launch_smoke.py
+  )
+
+  # The node test picks its own coordinated ROS domains (never a live SIM/HIL
+  # domain) and keeps discovery on this host.
+  ament_add_pytest_test(iii_drone_simulation_lab_mocap_gateway_test
+    test/test_simulated_lab_mocap_gateway.py
   )
 endif()
 

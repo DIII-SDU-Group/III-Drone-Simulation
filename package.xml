@@ -17,10 +17,12 @@
   <test_depend>ament_cmake_gtest</test_depend>
   <test_depend>ament_cmake_pytest</test_depend>
   <test_depend>python3-pytest</test_depend>
+  <test_depend>domain_coordinator</test_depend>
 
   <depend>rclcpp</depend>
   <depend>rclcpp_lifecycle</depend>
   <depend>rclpy</depend>
+  <depend>rcl_interfaces</depend>
   <depend>geometry_msgs</depend>
   <depend>nav_msgs</depend>
   <depend>sensor_msgs</depend>
