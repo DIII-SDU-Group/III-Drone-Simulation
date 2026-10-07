@@ -1,3 +1,5 @@
+import os
+
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.conditions import IfCondition, UnlessCondition
@@ -190,10 +192,18 @@ def generate_launch_description():
                 description="PX4 SITL instance, which names the vehicle's Gazebo model",
             ),
         ]
-        gazebo_imu = [
-            "/world/", gz_world, "/model/", POWERLINE_EVAL_LAYOUT, "_", px4_instance,
-            "/link/base_link/sensor/imu_sensor/imu",
-        ]
+        # The vehicle's Gazebo model is named <PX4 model>_<instance>.  A sensor timing
+        # profile of the evaluation layout is a model of its own
+        # (d4s_dc_drone_powerline_eval_<profile>); the runner names it in
+        # III_GAZEBO_DRONE_MODEL.  Without it the nominal evaluation model is assumed.
+        gazebo_model = os.environ.get("III_GAZEBO_DRONE_MODEL", "")
+        if gazebo_model.startswith(POWERLINE_EVAL_LAYOUT):
+            gazebo_imu = ["/world/", gz_world, "/model/", gazebo_model, "/link/base_link/sensor/imu_sensor/imu"]
+        else:
+            gazebo_imu = [
+                "/world/", gz_world, "/model/", POWERLINE_EVAL_LAYOUT, "_", px4_instance,
+                "/link/base_link/sensor/imu_sensor/imu",
+            ]
         layout_bridges += [
             Node(
                 package='ros_gz_bridge',

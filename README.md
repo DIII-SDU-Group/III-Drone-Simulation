@@ -54,6 +54,13 @@ These launch files are the main integration points consumed by the larger III la
   `--sim-model gz_d4s_dc_drone_powerline_eval` and the configuration constant
   `/tf/sim/sensor_layout`. See `docs/perception-dataset-ground-truth.md` and
   `docs/powerline-slam-integration.md` in the workspace.
+  Sensor timing profiles of that variant are models of their own with the same
+  sensor layout, `d4s_dc_drone_powerline_eval_<profile>` (`aligned`,
+  `halfshift`, `maxphase`, `maxphase_drift`): they differ only in the radars'
+  frame-clock offsets against the camera (see each model's
+  `TIMING_PROFILE.json`). The isolated powerline SLAM runners select one with
+  `III_POWERLINE_SIM_MODEL` and name the spawned Gazebo model in
+  `III_GAZEBO_DRONE_MODEL`, which the Gazebo IMU bridge follows.
 
 ### Support Assets
 
