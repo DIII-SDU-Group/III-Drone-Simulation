@@ -128,21 +128,16 @@ ground truth and `/clock` stay in domain 42. Running the whole process with
 `ROS_DOMAIN_ID=0` instead would require bridging ground truth and `/clock`
 into the lab domain, which the real lab domain never carries.
 
-**Planned SIM/HIL qualification.** The opti_track path is not wired into SIM
-or HIL yet. The plan for that integration:
-
-1. Start PX4 SITL with a vision-only estimator (external-vision position and
-   yaw, no GNSS) in place of the standard SIM/HIL estimator inputs.
-2. Start the gateway next to the simulation adapters, for example
-   `ros2 run iii_drone_simulation simulated_lab_mocap_gateway --ros-args -p use_sim_time:=true -p rigid_body_id:=1`
-   (add `-p lab_domain_id:=0` in HIL).
-3. Run the drone stack with `opti_track_pose_relay` subscribing the same
-   rigid body in the lab domain, so PX4 receives the pose exactly as in the
-   lab.
-4. Exercise outages: `one_shot_dropout_s` for scripted cases (shorter than the
-   8 s watchdog, one 33 s restart, a 90 s outage) and the periodic schedule
-   for soaks, and check the relay's staleness handling and PX4's response
-   against Gazebo ground truth.
+**SIM rehearsal.** The workspace runs the `opti_track` profile against PX4
+SITL with this gateway: `tools/simulation/opti_track_rehearsal.sh` starts PX4
+with a vision-only estimator (external-vision position, height and yaw; no
+GNSS, no magnetometer), the Gazebo clock and ground-truth bridges, the gateway
+with `use_sim_time:=true`, and the daemon and Runtime API in profile
+`opti_track`. `scripts/workspace/run_opti_track_rehearsal.py` then flies the
+OptiTrack missions and judges the run (see the workspace `docs/testing.md`).
+The rehearsal injects one pose outage with `one_shot_dropout_s` while the
+aircraft is on the ground. Longer outages (one 33 s gateway restart, a 90 s
+outage) and in-flight outages are not part of it.
 
 ## Tests
 
