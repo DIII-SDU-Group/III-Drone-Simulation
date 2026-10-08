@@ -21,6 +21,8 @@
 #include <gz/transport/Node.hh>
 #include <sdf/Element.hh>
 
+#include <iii_drone_simulation/charger_gripper_jaws.hpp>
+
 namespace iii_drone::simulation
 {
 
@@ -145,14 +147,29 @@ public:
     if (sdf->HasElement("conductor_radius")) {
       this->conductor_radius_ = sdf->Get<double>("conductor_radius");
     }
-    if (sdf->HasElement("support_stiffness")) {
-      this->support_stiffness_ = sdf->Get<double>("support_stiffness");
+    if (sdf->HasElement("jaw_clearance")) {
+      this->jaws_.clearance = sdf->Get<double>("jaw_clearance");
     }
-    if (sdf->HasElement("support_damping")) {
-      this->support_damping_ = sdf->Get<double>("support_damping");
+    if (sdf->HasElement("jaw_stiffness")) {
+      this->jaws_.stiffness = sdf->Get<double>("jaw_stiffness");
+    }
+    if (sdf->HasElement("jaw_damping")) {
+      this->jaws_.damping = sdf->Get<double>("jaw_damping");
+    }
+    if (sdf->HasElement("wall_clearance")) {
+      this->jaws_.wall_clearance = sdf->Get<double>("wall_clearance");
+    }
+    if (sdf->HasElement("jaw_rotational_damping")) {
+      this->jaws_.rotational_damping = sdf->Get<double>("jaw_rotational_damping");
+    }
+    if (sdf->HasElement("along_hold_stiffness")) {
+      this->jaws_.along_stiffness = sdf->Get<double>("along_hold_stiffness");
+    }
+    if (sdf->HasElement("along_hold_damping")) {
+      this->jaws_.along_damping = sdf->Get<double>("along_hold_damping");
     }
     if (sdf->HasElement("support_force_limit")) {
-      this->support_force_limit_ = sdf->Get<double>("support_force_limit");
+      this->jaws_.force_limit = sdf->Get<double>("support_force_limit");
     }
     if (sdf->HasElement("support_ramp_duration_s")) {
       this->support_ramp_duration_s_ = std::max(
@@ -317,6 +334,10 @@ private:
     if (!root["conductors"]) {
       return false;
     }
+    if (root["conductor_radius_m"]) {
+      // The conductor asset owns the radius; its collision cylinders use it too.
+      this->conductor_radius_ = root["conductor_radius_m"].as<double>();
+    }
 
     for (const auto & conductor_node : root["conductors"]) {
       Conductor conductor;
@@ -396,9 +417,8 @@ private:
       this->link_.WorldLinearVelocity(ecm).value_or(gz::math::Vector3d::Zero);
     const auto angular_velocity =
       this->link_.WorldAngularVelocity(ecm).value_or(gz::math::Vector3d::Zero);
-    const auto target_gripper_world =
-      this->latch_point_world_ - gripper_world_pose.Rot().RotateVector(this->latch_local_point_);
-    const auto position_error = target_gripper_world - gripper_world_pose.Pos();
+    const auto seat_world =
+      gripper_world_pose.Pos() + gripper_world_pose.Rot().RotateVector(this->latch_local_point_);
     const auto application_point_link =
       this->gripper_pose_.Pos() +
       this->gripper_pose_.Rot().RotateVector(this->latch_local_point_);
@@ -407,12 +427,11 @@ private:
       link_pose.has_value() ?
       link_pose->Rot().RotateVector(application_point_link) :
       gz::math::Vector3d::Zero;
-    const auto point_velocity =
+    const auto seat_velocity_world =
       linear_velocity + angular_velocity.Cross(application_offset_world);
 
-    // A single compliant contact force at the gripper latch point lets gravity
-    // rotate the vehicle naturally until its center of mass hangs below the cable.
-    double ramp_scale = 1.0;
+    // The jaws engage over a short ramp after they close.
+    double engagement = 1.0;
     if (
       this->support_ramp_duration_s_ > 0.0 &&
       this->latched_at_ != std::chrono::steady_clock::duration::min())
@@ -421,20 +440,22 @@ private:
         std::chrono::duration<double>(sim_time - this->latched_at_).count();
       const double progress = std::clamp(
         elapsed_s / this->support_ramp_duration_s_, 0.0, 1.0);
-      ramp_scale = progress * progress * (3.0 - 2.0 * progress);
+      engagement = progress * progress * (3.0 - 2.0 * progress);
     }
-    this->support_ramp_scale_ = ramp_scale;
+    this->support_ramp_scale_ = engagement;
 
-    auto latch_force = (
-      position_error * this->support_stiffness_ -
-      point_velocity * this->support_damping_) * ramp_scale;
+    const auto & rotation = gripper_world_pose.Rot();
+    const auto cable_from_seat = rotation.RotateVectorReverse(this->latch_point_world_ - seat_world);
+    const auto force_local = this->jaws_.Force(
+      cable_from_seat, rotation.RotateVectorReverse(seat_velocity_world), engagement);
+    this->jaw_load_ = force_local.Z();
 
-    const double force_length = latch_force.Length();
-    if (force_length > this->support_force_limit_) {
-      latch_force *= this->support_force_limit_ / force_length;
-    }
-
-    this->link_.AddWorldForce(ecm, latch_force, application_point_link);
+    // Applied at the seat, so gravity swings the vehicle below the cable; the
+    // jaws' friction damps that swing.
+    this->link_.AddWorldForce(ecm, rotation.RotateVector(force_local), application_point_link);
+    this->link_.AddWorldWrench(
+      ecm, gz::math::Vector3d::Zero,
+      rotation.RotateVector(this->jaws_.Torque(rotation.RotateVectorReverse(angular_velocity), engagement)));
   }
 
   void OnCommand(const gz::msgs::StringMsg & msg)
@@ -462,12 +483,14 @@ private:
     bool armed = false;
     bool latched = false;
     double support_ramp_scale = 0.0;
+    double jaw_load = 0.0;
     std::string latched_conductor;
     {
       std::lock_guard<std::mutex> lock(this->mutex_);
       armed = this->armed_;
       latched = this->latched_;
       support_ramp_scale = this->support_ramp_scale_;
+      jaw_load = this->latched_ ? this->jaw_load_ : 0.0;
       latched_conductor = this->latched_conductor_id_;
     }
 
@@ -497,6 +520,7 @@ private:
          << ";latch_along_tolerance=" << this->latch_along_tolerance_
          << ";conductor_radius=" << this->conductor_radius_
          << ";support_ramp_scale=" << support_ramp_scale
+         << ";jaw_load=" << jaw_load
          << ";seated_error=" << detection.closest_cross_distance
          << ";";
     msg.set_data(data.str());
@@ -531,9 +555,8 @@ private:
   bool configured_{false};
   std::string latched_conductor_id_;
   gz::math::Vector3d latch_point_world_{gz::math::Vector3d::Zero};
-  double support_stiffness_{600.0};
-  double support_damping_{80.0};
-  double support_force_limit_{250.0};
+  ChargerGripperJaws jaws_;
+  double jaw_load_{0.0};
   double support_ramp_duration_s_{0.35};
   double support_ramp_scale_{0.0};
 };

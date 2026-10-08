@@ -96,8 +96,6 @@ void DepthCamToMmwave::depth_cam_to_mmwave_pcl(const sensor_msgs::msg::PointClou
   unsigned int pcl_size = msg->width;
 
   RCLCPP_DEBUG(this->get_logger(), "Received %d points in msg", pcl_size);
-  uint8_t *ptr = msg->data.data();
-  const uint32_t POINT_STEP = 24;
 
   pcl::PointCloud<pcl::PointXYZ>::Ptr cloud (new pcl::PointCloud<pcl::PointXYZ>);
 
@@ -129,7 +127,7 @@ void DepthCamToMmwave::depth_cam_to_mmwave_pcl(const sensor_msgs::msg::PointClou
 
 pcl::PointCloud<pcl::PointXYZ>::Ptr DepthCamToMmwave::eucClustering(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud)
 {
-  RCLCPP_DEBUG(get_logger(), "PointCloud before filtering has: %d data points.", cloud->size());
+  RCLCPP_DEBUG(get_logger(), "PointCloud before filtering has: %zu data points.", cloud->size());
 
   publishPoints(cloud, received_points_publisher_, depth_cam_frame_id_);
 
@@ -161,7 +159,7 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr DepthCamToMmwave::eucClustering(pcl::PointCl
 
   }
 
-  RCLCPP_DEBUG(get_logger(), "PointCloud after filtering has: %d data points.", cloud_filtered->size());
+  RCLCPP_DEBUG(get_logger(), "PointCloud after filtering has: %zu data points.", cloud_filtered->size());
 
   publishPoints(cloud_filtered, filtered_points_publisher_, depth_cam_frame_id_);
 
@@ -212,7 +210,7 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr DepthCamToMmwave::eucClustering(pcl::PointCl
     pcl::PointXYZ pl_point (x, y, z);
     pl_points->push_back(pl_point);
 
-    RCLCPP_DEBUG(get_logger(), "PointCloud representing the Cluster: %d data points.", cloud_cluster->size());
+    RCLCPP_DEBUG(get_logger(), "PointCloud representing the Cluster: %zu data points.", cloud_cluster->size());
     j++;
   }
 
