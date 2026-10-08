@@ -733,7 +733,11 @@ void MmwaveConductorSensorPlugin::Configure(
     this->camera_truth_publisher_ = this->ros_node_->create_publisher<
         iii_drone_interfaces::msg::CameraFrameGroundTruth>(
         "/simulation/ground_truth/cable_camera/frame", rclcpp::QoS(100).reliable());
-    if (!this->pylons_.empty())
+    // Evaluator pylon frames come from a segmentation sensor of the model.  A model
+    // without that sensor says so with an empty <pylon_semantic_topic>: no pylon
+    // frame topic is created, nothing is subscribed, and no RGB frame is held for
+    // a registration that cannot happen.
+    if (!this->pylons_.empty() && !this->pylon_semantic_topic_.empty())
     {
       this->pylon_mask_ros_publisher_ = this->ros_node_->create_publisher<sensor_msgs::msg::Image>(
           this->pylon_mask_topic_, rclcpp::QoS(100).reliable());
@@ -829,7 +833,8 @@ void MmwaveConductorSensorPlugin::Configure(
           << this->camera_image_topic_ << "].\n";
     return;
   }
-  if (this->publish_camera_ && !this->pylons_.empty() && !this->transport_node_.Subscribe(
+  if (this->publish_camera_ && !this->pylons_.empty() && !this->pylon_semantic_topic_.empty() &&
+      !this->transport_node_.Subscribe(
       this->pylon_semantic_topic_,
       &MmwaveConductorSensorPlugin::OnPylonSemanticImage, this))
   {
@@ -1855,8 +1860,8 @@ void MmwaveConductorSensorPlugin::OnCameraImage(const gz::msgs::Image & image)
     std::lock_guard<std::mutex> lock(this->camera_registration_mutex_);
     frame_sequence = this->camera_frame_sequence_++;
     // Evaluator pylon frames are registered to RGB frames by source stamp,
-    // only when a pylon map is configured.
-    if (!this->pylons_.empty())
+    // only when a pylon map and a segmentation source are configured.
+    if (!this->pylons_.empty() && !this->pylon_semantic_topic_.empty())
     {
       const auto pending = this->pending_pylon_frames_.find(stamp_ns);
       if (pending != this->pending_pylon_frames_.end())

@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import math
 from pathlib import Path
 import subprocess
@@ -703,3 +704,41 @@ def test_simulation_launcher_never_owns_qgroundcontrol_and_declares_host_udp_tra
     assert not (
         WORKSPACE_ROOT / "tools/simulation/managed_qgroundcontrol_config.yaml"
     ).exists()
+
+
+def test_long_operation_profile_is_its_base_profile_without_the_segmentation_sensor():
+    """powerline_slam WO-2026-10-08-001: the opt-in long-operation model omits the truth-only sensor and nothing else."""
+    models = PACKAGE_ROOT / "Gazebo-simulation-assets/models"
+    base = ET.parse(models / "d4s_dc_drone_powerline_eval_maxphase/model.sdf").getroot()
+    longrun = ET.parse(models / "d4s_dc_drone_powerline_eval_maxphase_longrun/model.sdf").getroot()
+    sensors = lambda root: {s.get("name"): ET.tostring(s).strip() for s in root.iter("sensor")}  # noqa: E731
+    assert set(sensors(base)) - set(sensors(longrun)) == {"pylon_semantic_camera"}
+    assert {k: v for k, v in sensors(base).items() if k != "pylon_semantic_camera"} == sensors(longrun)
+    assert longrun.find(".//sensor[@type='segmentation']") is None
+
+    def plugins(root, swap=None):
+        out = []
+        for plugin in root.iter("plugin"):
+            text = ET.tostring(plugin).strip().decode()
+            out.append(text if swap is None else text.replace(*swap))
+        return out
+    base_plugins = plugins(base, ("d4s_dc_drone_powerline_eval_maxphase/radar", "d4s_dc_drone_powerline_eval_maxphase_longrun/radar"))
+    differing = [(a, b) for a, b in zip(base_plugins, plugins(longrun)) if a != b]
+    assert len(base_plugins) == len(plugins(longrun)) and len(differing) == 2      # the two radar plugin instances
+    for a, b in differing:
+        assert a.replace("<pylon_semantic_topic>/simulation/ground_truth/cable_camera/pylon_semantic_raw/labels_map</pylon_semantic_topic>",
+                         "<pylon_semantic_topic />") == b.replace("<pylon_semantic_topic></pylon_semantic_topic>", "<pylon_semantic_topic />")
+    for name in ("RADAR_U.yaml", "RADAR_F.yaml"):
+        assert (models / "d4s_dc_drone_powerline_eval_maxphase_longrun/radar" / name).read_bytes() == (
+            models / "d4s_dc_drone_powerline_eval_maxphase/radar" / name).read_bytes()
+    a = json.loads((models / "d4s_dc_drone_powerline_eval_maxphase/TIMING_PROFILE.json").read_text())
+    b = json.loads((models / "d4s_dc_drone_powerline_eval_maxphase_longrun/TIMING_PROFILE.json").read_text())
+    assert b["base_profile"] == "maxphase" and b["long_operation"] == {"omitted_sensor": "pylon_semantic_camera", "pylon_frame_truth": False}
+    assert {k: v for k, v in a.items() if k not in ("profile", "model")} == {k: v for k, v in b.items() if k not in ("profile", "model", "base_profile", "long_operation")}
+
+
+def test_radar_plugin_accepts_a_model_without_a_segmentation_source():
+    """An empty pylon_semantic_topic creates no pylon-frame truth topic, subscribes nothing and holds no RGB frame."""
+    source = (PACKAGE_ROOT / "src/mmwave_conductor_sensor_plugin.cpp").read_text()
+    assert source.count("!this->pylons_.empty() && !this->pylon_semantic_topic_.empty()") == 3
+    assert "this->publish_camera_ && !this->pylons_.empty() && !this->pylon_semantic_topic_.empty() &&" in source
