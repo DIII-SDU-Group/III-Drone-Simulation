@@ -742,3 +742,43 @@ def test_radar_plugin_accepts_a_model_without_a_segmentation_source():
     source = (PACKAGE_ROOT / "src/mmwave_conductor_sensor_plugin.cpp").read_text()
     assert source.count("!this->pylons_.empty() && !this->pylon_semantic_topic_.empty()") == 3
     assert "this->publish_camera_ && !this->pylons_.empty() && !this->pylon_semantic_topic_.empty() &&" in source
+
+
+def test_c25_camera_mount_profiles_are_their_base_models_with_the_camera_pitch_only():
+    """powerline_slam WO-2026-10-09-001: the opt-in C25 models carry the cable camera 25 deg forward from upward on the
+    RGB sensor, the evaluator's segmentation sensor and both radar plugins' camera pose, and are otherwise their base
+    models; the long-operation flavour has no segmentation sensor; the C20 models keep their pose."""
+    models = PACKAGE_ROOT / "Gazebo-simulation-assets/models"
+    c20 = "0 -0.215 0.3 0 -1.2217304763960306 0"
+    c25 = "0 -0.215 0.3 0 -1.1344640137963142 0"
+    assert math.isclose(float(c25.split()[4]), -math.radians(65.0), abs_tol=1e-15)       # 25 deg from upward (pitch -90 deg is upward)
+    assert math.isclose(float(c20.split()[4]), -math.radians(70.0), abs_tol=1e-15)
+    for profile, segmentation in (("maxphase", True), ("maxphase_drift", True), ("maxphase_longrun", False)):
+        base_name, name = f"d4s_dc_drone_powerline_eval_{profile}", f"d4s_dc_drone_powerline_eval_c25_{profile}"
+        base_text, text = (models / base_name / "model.sdf").read_text(), (models / name / "model.sdf").read_text()
+        assert text == base_text.replace(base_name, name).replace(c20, c25) and c20 not in text and c25 not in base_text
+        root = ET.parse(models / name / "model.sdf").getroot()
+        camera = root.find(".//sensor[@name='cable_camera']")
+        assert camera.findtext("pose") == c25 and camera.findtext("gz_frame_id") == "cable_camera"
+        assert camera.findtext("camera/horizontal_fov") == "1.3962634" and camera.findtext("update_rate") == "10"
+        semantic = root.find(".//sensor[@name='pylon_semantic_camera']")
+        assert (semantic is not None) == segmentation and (root.find(".//sensor[@type='segmentation']") is not None) == segmentation
+        if segmentation:
+            assert semantic.findtext("pose") == c25
+        radars = {plugin.findtext("radar_instance"): plugin for plugin in _radar_plugins(root)}
+        base_radars = {plugin.findtext("radar_instance"): plugin for plugin in _radar_plugins(ET.parse(models / base_name / "model.sdf").getroot())}
+        assert set(radars) == {"mmwave", "mmwave_forward"}
+        for instance, plugin in radars.items():
+            assert plugin.findtext("camera_pose") == c25
+            for field in ("sensor_pose", "schedule_offset_ms", "peer_offset_ms", "peer_active_ms", "schedule_jitter_sigma_us", "radar_model", "topic", "frame_id"):
+                assert plugin.findtext(field) == base_radars[instance].findtext(field), (name, instance, field)
+        for config in sorted((models / base_name / "radar").glob("*.yaml")):
+            assert (models / name / "radar" / config.name).read_bytes() == config.read_bytes()
+        a = json.loads((models / base_name / "TIMING_PROFILE.json").read_text())
+        b = json.loads((models / name / "TIMING_PROFILE.json").read_text())
+        assert b["camera_mount"] == {"label": "C25", "base_model": base_name, "pose_xyz_rpy": c25, "base_pose_xyz_rpy": c20}
+        assert {k: v for k, v in a.items() if k not in ("profile", "model")} == {k: v for k, v in b.items() if k not in ("profile", "model", "camera_mount")}
+    airframes = PACKAGE_ROOT / "Gazebo-simulation-assets/init.d-posix_airframes"
+    for number, profile in ((99990, "maxphase"), (99989, "maxphase_drift"), (99988, "maxphase_longrun")):
+        text = (airframes / f"{number}_gz_d4s_dc_drone_powerline_eval_c25_{profile}").read_text()
+        assert f"PX4_SIM_MODEL=${{PX4_SIM_MODEL:=d4s_dc_drone_powerline_eval_c25_{profile}}}" in text and "camera mount C25" in text
